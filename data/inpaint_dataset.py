@@ -2,24 +2,27 @@ import torch
 from torch.utils.data import Dataset
 from torchvision import transforms
 from PIL import Image
+from .base_dataset import BaseDataset
 ALLMASKTYPES = ['bbox', 'seg', 'random']
 
 
-def InpaintDataset(Dataset):
+def InpaintDataset(BaseDataset):
     """
     Dataset for Inpainting task
     Params:
         img_flist_path(str): The file which contains img file path list (e.g. test.flist)
         mask_flist_paths_dict(dict): The dict contain the files which contains the pkl or xml file path for
                                 generate mask. And the key represent the mask type (e.g. {"bbox":"bbox_flist.txt", "seg":..., "random":None})
-        resize_shape(tuple): The shape of the final image
-        random_crop(bool) : Determine whether use random crop
-        random_bbox_shape(tuple): if use random bbox, it define the shape of the bbox
+        resize_shape(tuple): The shape of the final image (default:(256,256))
+        transforms_oprs(list) : Determine which transformation used on the imgae (default:['random_crop', 'to_tensor'])
+        random_bbox_shape(tuple): if use random bbox mask, it define the shape of the mask (default:(32,32))
+        random_bbox_margin(tuple): if use random bbox, it define the margin of the bbox which means the distance between the mask and the margin of the image
+                                    (default:(64,64))
     Return:
         img, *mask
     """
     def __init__(self, img_flist_path, mask_flist_paths_dict,
-                resize_shape=(256, 256), random_crop=True, random_bbox_shape=(32, 32), random_bbox_margin=(64, 64)):
+                resize_shape=(256, 256), transforms_oprs=['random_crop', 'to_tensor'], random_bbox_shape=(32, 32), random_bbox_margin=(64, 64)):
 
         with open(img_flist_path, 'r') as f:
             self.img_paths = f.read().splitlines()
@@ -34,7 +37,7 @@ def InpaintDataset(Dataset):
 
         self.resize_shape = resize_shape
         self.random_bbox_shape = random_bbox_shape
-        self.transform_initialize(resize_shape)
+        self.transform_initialize(resize_shape, transforms_oprs)
 
 
 
@@ -54,29 +57,6 @@ def InpaintDataset(Dataset):
 
         return img, masks
 
-    def transform_initialize(self, crop_size, config=['random_crop', 'to_tensor']):
-        """
-        Initialize the transformation oprs and create transform function for img
-        """
-        self.transforms_oprs = {}
-        self.transforms_oprs["hflip "]= transforms.RandomHorizontalFlip(0.5)
-        self.transforms_oprs["vflip"] = transforms.RandomVerticalFlip(0.5)
-        self.transforms_oprs["random_crop"] = transforms.RandomCrop(crop_size)
-        self.transforms_oprs["to_tensor"] = transforms.ToTensor()
-        self.transforms_oprs["norm"] = transforms.Normalize(mean=[0.485, 0.456, 0.406],std=[0.229, 0.224, 0.225])
-        self.transforms_oprs["resize"] = transforms.Resize(crop_size)
-        self.transforms_oprs["center_crop"] = transforms.CenterCrop(crop_size)
-        self.transforms_oprs["rdresizecrop"] = transforms.RandomResizedCrop(crop_size, scale=(0.7, 1.0), ratio=(1,1), interpolation=2)
-        self.transforms_fun = transforms.Compose([self.transforms_oprs[name] for name in config])
-
-    @staticmethod
-    def read_img(path):
-        """
-        Read Images
-        """
-        img = Image.open(path)
-
-        return np.array(img)
 
     @staticmethod
     def read_mask(path, mask_type):
@@ -85,6 +65,7 @@ def InpaintDataset(Dataset):
         """
         if mask_type == 'random':
             bbox = random_bbox(self.resize_shape, self.random_bbox_shape)
+
     @staticmethod
     def read_bbox(path):
         """
