@@ -24,6 +24,7 @@ class BaseDataset(Dataset):
         """
         Initialize the transformation oprs and create transform function for img
         """
+        #print(crop_size)
         self.transforms_oprs = {}
         self.transforms_oprs["hflip "]= transforms.RandomHorizontalFlip(0.5)
         self.transforms_oprs["vflip"] = transforms.RandomVerticalFlip(0.5)

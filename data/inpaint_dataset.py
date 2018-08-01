@@ -1,13 +1,14 @@
 import torch
-from torch.utils.data import Dataset
+import numpy as np
+import cv2
+import os
 from torchvision import transforms
 from PIL import Image
 from .base_dataset import BaseDataset, NoriBaseDataset
+from torch.utils.data import Dataset
 
-import numpy as np
-import cv2
 
-ALLMASKTYPES = ['bbox', 'seg', 'random']
+ALLMASKTYPES = ['bbox', 'seg', 'random', 'random_free_form']
 
 
 
@@ -30,13 +31,14 @@ class InpaintDataset(BaseDataset):
     def __init__(self, img_flist_path, mask_flist_paths_dict,
                 resize_shape=(256, 256), transforms_oprs=['random_crop', 'to_tensor'],
                 random_bbox_shape=(32, 32), random_bbox_margin=(64, 64),
-                random_ff_setting={'mv':5, 'ma':4.0, 'ml':40, 'mbw':10}):
+                random_ff_setting={'img_shape':[256,256],'mv':5, 'ma':4.0, 'ml':40, 'mbw':10}):
 
         with open(img_flist_path, 'r') as f:
             self.img_paths = f.read().splitlines()
 
         self.mask_paths = {}
         for mask_type in mask_flist_paths_dict:
+            #print(mask_type)
             assert mask_type in ALLMASKTYPES
             if 'random' in mask_type:
                 self.mask_paths[mask_type] = ['' for i in self.img_paths]
@@ -59,14 +61,18 @@ class InpaintDataset(BaseDataset):
     def __getitem__(self, index):
         # create the paths for images and masks
         img_path = self.img_paths[index]
+        while not os.path.isfile(img_path):
+            index = np.random.randint(0, high=len(self))
+            img_path = self.img_paths[index]
         mask_paths = {}
         for mask_type in self.mask_paths:
             mask_paths[mask_type] = self.mask_paths[mask_type][index]
 
         img = self.transforms_fun(self.read_img(img_path))
-        masks = {mask_type:self.transforms_fun(self.read_mask(mask_paths[mask_type], mask_type)) for mask_type in mask_paths}
 
-        return img*255, masks*255
+        masks = {mask_type:255*self.transforms_fun(self.read_mask(mask_paths[mask_type], mask_type))[:1, :,:] for mask_type in mask_paths}
+
+        return img*255, masks
 
     def read_img(self, path):
         """
@@ -84,9 +90,10 @@ class InpaintDataset(BaseDataset):
             bbox = InpaintDataset.random_bbox(self.resize_shape, self.random_bbox_margin, self.random_bbox_shape)
         elif mask_type == 'random_free_form':
             mask = InpaintDataset.random_ff_mask(self.random_ff_setting)
+            return Image.fromarray(np.tile(mask*255,(1,1,3)).astype(np.uint8))
         else:
             bbox = InpaintDataset.read_bbox(path)
-        return bbox2mask(bbox, self.resize_shape)
+        return InpaintDataset.bbox2mask(bbox, self.resize_shape)
 
     @staticmethod
     def read_bbox(path):
@@ -202,7 +209,7 @@ class InpaintDataset(BaseDataset):
 
         """
 
-        h,w = img_shape
+        h,w = config['img_shape']
         mask = np.zeros((h,w))
         num_v = 8+np.random.randint(config['mv'])#tf.random_uniform([], minval=0, maxval=config.MAXVERTEX, dtype=tf.int32)
 

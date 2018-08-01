@@ -5,15 +5,18 @@ from models.gatedconv import InpaintGCNet, InpaintDirciminator
 from models.loss import SNDisLoss, SNGenLoss, ReconLoss
 from util.logger import TensorBoardLogger
 from util.config import Config
+from data.inpaint_dataset import InpaintDataset
+from util.evaluation import AverageMeter
 
 import logging
 import time
+import sys
 # python train inpaint.yml
 config = Config(sys.argv[1])
 logger = logging.getLogger(__name__)
-tensorboardlogger = TensorBoardLogger()
+tensorboardlogger = TensorBoardLogger('model_logs/{}_{}'.format(time.strftime('%Y%m%d%H%M', time.localtime(time.time())), config.LOG_DIR))
 cuda0 = torch.device('cuda:{}'.format(config.GPU_ID))
-
+#cuda0 = torch.device('cpu')
 
 def logger_init():
     """
@@ -43,27 +46,35 @@ def validate(netG, netD, GLoss, ReconLoss, DLoss, optG, optD, dataloader, epoch,
     end = time.time()
     for i, (imgs, masks) in enumerate(dataloader):
         data_time.update(time.time() - end)
-
-        imgs, masks = masked_imgs.to(device), masks.to(device)
+        masks = masks['random_free_form']
+        imgs, masks = imgs.to(device), masks.to(device)
         imgs = (imgs / 127.5 - 1)
         # mask is 1 on masked region
-
+        # forward
         coarse_imgs, recon_imgs = netG(imgs, masks)
 
-        complete_imgs = recon_imgs * mask + imgs * (1 - masks)
-        g_loss = GANLoss(imgs, complete_imgs)
+        complete_imgs = recon_imgs * masks + imgs * (1 - masks)
+
+        pos_imgs = torch.cat([imgs, masks, torch.full_like(masks, 1.)], dim=1)
+        neg_imgs = torch.cat([complete_imgs, masks, torch.full_like(masks, 1.)], dim=1)
+        pos_neg_imgs = torch.cat([pos_imgs, neg_imgs], dim=0)
+
+        pred_pos_neg = netD(pos_neg_imgs)
+        pred_pos, pred_neg = torch.split(pred_pos_neg, 2, dim=0)
+
+
+        g_loss = GANLoss(pred_neg)
+
         r_loss = ReconLoss(imgs, coarse_imgs, recon_imgs, masks)
 
         whole_loss = g_loss + r_loss
+
         # Update the recorder for losses
         losses['g_loss'].update(g_loss.item(), imgs.size(0))
         losses['r_loss'].update(r_loss.item(), imgs.size(0))
         losses['whole_loss'].update(whole_loss.item(), imgs.size(0))
 
-        input_imgs = torch.cat([complete_imgs, masks, torch.full_like(masks, 1.)], dim=1)
-        prediction = netD(input_imgs)
-
-        d_loss = DLoss(prediction)
+        d_loss = DLoss(pred_pos, pred_neg)
         losses['d_loss'].update(d_loss.item(), imgs.size(0))
         # Update time recorder
         batch_time.update(time.time() - end)
@@ -74,7 +85,7 @@ def validate(netG, netD, GLoss, ReconLoss, DLoss, optG, optD, dataloader, epoch,
                     Recon Loss:{r_loss.val:.4f}, GAN Loss:{g_loss.val:.4f}, D Loss:{d_loss.val:.4f}" \
                     .format(epoch, i, len(dataloader), whole_loss=losses['whole_loss'], r_loss=losses['r_loss'] \
                     ,g_loss=losses['g_loss'], d_loss=losses['d_loss']))
-                    
+
         if i*config.BATCH_SIZE < config.STATIC_VIEW_SIZE:
             def img2photo(imgs):
                 return ((imgs+1)*127.5).transpose(1,2).transpose(2,3).cpu().numpy()
@@ -105,19 +116,41 @@ def train(netG, netD, GANLoss, ReconLoss, DLoss, optG, optD, dataloader, epoch, 
     end = time.time()
     for i, (imgs, masks) in enumerate(dataloader):
         data_time.update(time.time() - end)
-        # Optimize Generator
-        imgs, masks = masked_imgs.to(device), masks.to(device)
+        masks = masks['random_free_form']
+
+        # Optimize Discriminator
+        optD.zero_grad(), netD.zero_grad()
+
+        imgs, masks = imgs.to(device), masks.to(device)
         imgs = (imgs / 127.5 - 1)
         # mask is 1 on masked region
-        optG.zero_grad()
-
         coarse_imgs, recon_imgs = netG(imgs, masks)
 
-        complete_imgs = recon_imgs * mask + imgs * (1 - masks)
-        g_loss = GANLoss(imgs, complete_imgs)
+        complete_imgs = recon_imgs * masks + imgs * (1 - masks)
+
+        pos_imgs = torch.cat([imgs, masks, torch.full_like(masks, 1.)], dim=1)
+        neg_imgs = torch.cat([complete_imgs, masks, torch.full_like(masks, 1.)], dim=1)
+        pos_neg_imgs = torch.cat([pos_imgs, neg_imgs], dim=0)
+
+        pred_pos_neg = netD(pos_neg_imgs)
+        pred_pos, pred_neg = torch.split(pred_pos_neg, 2, dim=0)
+
+        d_loss = DLoss(pred_pos, pred_neg)
+        losses['d_loss'].update(d_loss.item(), imgs.size(0))
+        d_loss.backward()
+
+        optD.step()
+
+
+        # Optimize Generator
+        optG.zero_grad(), netG.zero_grad()
+        pred_pos_neg = netD(pos_neg_imgs)
+        pred_pos, pred_neg = torch.split(pred_pos_neg, 2, dim=0)
+        g_loss = GANLoss(pred_neg)
         r_loss = ReconLoss(imgs, coarse_imgs, recon_imgs, masks)
 
         whole_loss = g_loss + r_loss
+
         # Update the recorder for losses
         losses['g_loss'].update(g_loss.item(), imgs.size(0))
         losses['r_loss'].update(r_loss.item(), imgs.size(0))
@@ -126,16 +159,7 @@ def train(netG, netD, GANLoss, ReconLoss, DLoss, optG, optD, dataloader, epoch, 
 
         optG.step()
 
-        # Optimize Discriminator
-        optD.zero_grad()
-        input_imgs = torch.cat([complete_imgs, masks, torch.full_like(masks, 1.)], dim=1)
-        prediction = netD(input_imgs)
 
-        d_loss = DLoss(prediction)
-        losses['d_loss'].update(d_loss.item(), imgs.size(0))
-        d_loss.backward()
-
-        optD.step()
         # Update time recorder
         batch_time.update(time.time() - end)
 
@@ -176,16 +200,16 @@ def main():
     # Dataset setting
     logger.info("Initialize the dataset...")
     train_dataset = InpaintDataset(config.DATA_FLIST[dataset_type][0],\
-                                      {config.DATA_FLIST[config.MASKDATASET][mask_type][0] for mask_type in config.MASK_TYPES}, \
-                                      resize_shape=config.IMG_SHAPES, random_bbox_shape=config.RANDOM_BBOX_SHAPE, \
+                                      {mask_type:config.DATA_FLIST[config.MASKDATASET][mask_type][0] for mask_type in config.MASK_TYPES}, \
+                                      resize_shape=tuple(config.IMG_SHAPES), random_bbox_shape=config.RANDOM_BBOX_SHAPE, \
                                       random_bbox_margin=config.RANDOM_BBOX_MARGIN,
                                       random_ff_setting=config.RANDOM_FF_SETTING)
     train_loader = train_dataset.loader(batch_size=batch_size, shuffle=True,
                                             num_workers=16, pin_memory=True)
 
     val_dataset = InpaintDataset(config.DATA_FLIST[dataset_type][1],\
-                                    {config.DATA_FLIST[config.MASKDATASET][mask_type][1] for mask_type in config.MASK_TYPES}, \
-                                    resize_shape=config.IMG_SHAPES, random_bbox_shape=config.RANDOM_BBOX_SHAPE, \
+                                    {mask_type:config.DATA_FLIST[config.MASKDATASET][mask_type][1] for mask_type in config.MASK_TYPES}, \
+                                    resize_shape=tuple(config.IMG_SHAPES), random_bbox_shape=config.RANDOM_BBOX_SHAPE, \
                                     random_bbox_margin=config.RANDOM_BBOX_MARGIN,
                                     random_ff_setting=config.RANDOM_FF_SETTING)
     val_loader = val_dataset.loader(batch_size=batch_size, shuffle=False,
@@ -196,7 +220,7 @@ def main():
     logger.info("Define the Network Structure and Losses")
     netG = InpaintGCNet()
     netD = InpaintDirciminator()
-    netG, netD = netG.to(device), netD.to(device)
+    netG, netD = netG.to(cuda0), netD.to(cuda0)
 
     # Define loss
     recon_loss = ReconLoss(*(config.L1_LOSS_ALPHA))
@@ -214,10 +238,10 @@ def main():
 
     for i in range(epoch):
         #train data
-        train(netG, netD, gan_loss, recon_Loss, dis_Loss, optG, optD, train_loader, epoch, device=cuda0)
+        train(netG, netD, gan_loss, recon_loss, dis_loss, optG, optD, train_loader, epoch, device=cuda0)
 
         # validate
-        validate(netG, netD, gan_Loss, recon_Loss, dis_Loss, optG, optD, val_loader, epoch, device=cuda0)
+        validate(netG, netD, gan_Loss, recon_loss, dis_loss, optG, optD, val_loader, epoch, device=cuda0)
 
         torch.save({
             'epoch': epoch + 1,
@@ -226,3 +250,5 @@ def main():
             'optG' : optG.state_dict(),
             'optD' : optD.state_dict()
         }, filename='epoch_{}_gateconv_snpgan_ckpt.pth.tar'.format(epoch+1))
+if __name__ == '__main__':
+    main()
