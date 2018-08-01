@@ -89,7 +89,7 @@ class InpaintDirciminator(nn.Module):
             SNConvWithActivation(8*cnum, 8*cnum, 5, 2, padding=get_pad(32, 5, 2)),
             SNConvWithActivation(8*cnum, 8*cnum, 5, 2, padding=get_pad(16, 5, 2)),
             SNConvWithActivation(8*cnum, 8*cnum, 5, 2, padding=get_pad(8, 5, 2)),
-            SNConvWithActivation(58*cnum, 8*cnum, 5, 2, padding=get_pad(4, 5, 2)),
+            SNConvWithActivation(8*cnum, 8*cnum, 5, 2, padding=get_pad(4, 5, 2)),
         )
 
     def forward(self, input):

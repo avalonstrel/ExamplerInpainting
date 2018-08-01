@@ -14,7 +14,8 @@ import sys
 # python train inpaint.yml
 config = Config(sys.argv[1])
 logger = logging.getLogger(__name__)
-tensorboardlogger = TensorBoardLogger('model_logs/{}_{}'.format(time.strftime('%Y%m%d%H%M', time.localtime(time.time())), config.LOG_DIR))
+log_dir = 'model_logs/{}_{}'.format(time.strftime('%Y%m%d%H%M', time.localtime(time.time())), config.LOG_DIR)
+tensorboardlogger = TensorBoardLogger(log_dir)
 cuda0 = torch.device('cuda:{}'.format(config.GPU_ID))
 #cuda0 = torch.device('cpu')
 
@@ -31,7 +32,7 @@ def logger_init():
     logger.addHandler(fh)
 
 
-def validate(netG, netD, GLoss, ReconLoss, DLoss, optG, optD, dataloader, epoch, device=cuda0):
+def validate(netG, netD, GANLoss, ReconLoss, DLoss, optG, optD, dataloader, epoch, device=cuda0):
     """
     validate phase
     """
@@ -39,7 +40,7 @@ def validate(netG, netD, GLoss, ReconLoss, DLoss, optG, optD, dataloader, epoch,
     netD.eval()
     batch_time = AverageMeter()
     data_time = AverageMeter()
-    losses = {"g_loss":AverageMeter(), "r_loss":AverageMeter(), "whole_loss":AverageMeter()}
+    losses = {"g_loss":AverageMeter(), "r_loss":AverageMeter(), "whole_loss":AverageMeter(), "d_loss":AverageMeter()}
 
     netG.train()
     netD.train()
@@ -60,7 +61,7 @@ def validate(netG, netD, GLoss, ReconLoss, DLoss, optG, optD, dataloader, epoch,
         pos_neg_imgs = torch.cat([pos_imgs, neg_imgs], dim=0)
 
         pred_pos_neg = netD(pos_neg_imgs)
-        pred_pos, pred_neg = torch.split(pred_pos_neg, 2, dim=0)
+        pred_pos, pred_neg = torch.chunk(pred_pos_neg,  2, dim=0)
 
 
         g_loss = GANLoss(pred_neg)
@@ -81,14 +82,14 @@ def validate(netG, netD, GLoss, ReconLoss, DLoss, optG, optD, dataloader, epoch,
 
 
         # Logger logging
-        logger.info("Validation Epoch {0}, [{1}/{2}]: Whole Gen Loss{whole_loss.val:.4f}, \
-                    Recon Loss:{r_loss.val:.4f}, GAN Loss:{g_loss.val:.4f}, D Loss:{d_loss.val:.4f}" \
+        logger.info("Validation Epoch {0}, [{1}/{2}]: Whole Gen Loss{whole_loss.val:.4f}\t,"
+                    "Recon Loss:{r_loss.val:.4f},\t GAN Loss:{g_loss.val:.4f},\t D Loss:{d_loss.val:.4f}"
                     .format(epoch, i, len(dataloader), whole_loss=losses['whole_loss'], r_loss=losses['r_loss'] \
                     ,g_loss=losses['g_loss'], d_loss=losses['d_loss']))
 
         if i*config.BATCH_SIZE < config.STATIC_VIEW_SIZE:
             def img2photo(imgs):
-                return ((imgs+1)*127.5).transpose(1,2).transpose(2,3).cpu().numpy()
+                return ((imgs+1)*127.5).transpose(1,2).transpose(2,3).detach().cpu().numpy()
             info = { 'val/ori_imgs':img2photo(imgs),
                      'val/coarse_imgs':img2photo(coarse_imgs),
                      'val/recon_imgs':img2photo(recon_imgs),
@@ -109,7 +110,7 @@ def train(netG, netD, GANLoss, ReconLoss, DLoss, optG, optD, dataloader, epoch, 
     """
     batch_time = AverageMeter()
     data_time = AverageMeter()
-    losses = {"g_loss":AverageMeter(), "r_loss":AverageMeter(), "whole_loss":AverageMeter()}
+    losses = {"g_loss":AverageMeter(), "r_loss":AverageMeter(), "whole_loss":AverageMeter(), 'd_loss':AverageMeter()}
 
     netG.train()
     netD.train()
@@ -133,11 +134,11 @@ def train(netG, netD, GANLoss, ReconLoss, DLoss, optG, optD, dataloader, epoch, 
         pos_neg_imgs = torch.cat([pos_imgs, neg_imgs], dim=0)
 
         pred_pos_neg = netD(pos_neg_imgs)
-        pred_pos, pred_neg = torch.split(pred_pos_neg, 2, dim=0)
-
+        pred_pos, pred_neg = torch.chunk(pred_pos_neg, 2, dim=0)
+        #print(pred_pos.size())
         d_loss = DLoss(pred_pos, pred_neg)
         losses['d_loss'].update(d_loss.item(), imgs.size(0))
-        d_loss.backward()
+        d_loss.backward(retain_graph=True)
 
         optD.step()
 
@@ -145,7 +146,7 @@ def train(netG, netD, GANLoss, ReconLoss, DLoss, optG, optD, dataloader, epoch, 
         # Optimize Generator
         optG.zero_grad(), netG.zero_grad()
         pred_pos_neg = netD(pos_neg_imgs)
-        pred_pos, pred_neg = torch.split(pred_pos_neg, 2, dim=0)
+        pred_pos, pred_neg = torch.chunk(pred_pos_neg,  2, dim=0)
         g_loss = GANLoss(pred_neg)
         r_loss = ReconLoss(imgs, coarse_imgs, recon_imgs, masks)
 
@@ -166,21 +167,21 @@ def train(netG, netD, GANLoss, ReconLoss, DLoss, optG, optD, dataloader, epoch, 
 
         if i % config.SUMMARY_FREQ == 0:
             # Logger logging
-            logger.info("Epoch {0}, [{1}/{2}]: Whole Gen Loss{whole_loss.val:.4f}, \
-                        Recon Loss:{r_loss.val:.4f}, GAN Loss:{g_loss.val:.4f}, D Loss:{d_loss.val:.4f}" \
+            logger.info("Epoch {0}, [{1}/{2}]: Whole Gen Loss{whole_loss.val:.4f}\t,"
+                        "Recon Loss:{r_loss.val:.4f},\t GAN Loss:{g_loss.val:.4f},\t D Loss:{d_loss.val:.4f}" \
                         .format(epoch, i, len(dataloader), whole_loss=losses['whole_loss'], r_loss=losses['r_loss'] \
                         ,g_loss=losses['g_loss'], d_loss=losses['d_loss']))
             # Tensorboard logger for scaler and images
             info_terms = {'WGLoss':whole_loss.item(), 'ReconLoss':r_loss.item(), "GANLoss":g_loss.item(), "DLoss":d_loss.item()}
 
-            for tag, value in info.items():
+            for tag, value in info_terms.items():
                 tensorboardlogger.scalar_summary(tag, value, epoch*len(dataloader)+i)
 
             for tag, value in losses.items():
-                tensorboardlogger.scalar_summary('avg_'+tag, value.val, epoch*len(dataloader)+i)
+                tensorboardlogger.scalar_summary('avg_'+tag, value.avg, epoch*len(dataloader)+i)
 
             def img2photo(imgs):
-                return ((imgs+1)*127.5).transpose(1,2).transpose(2,3).cpu().numpy()
+                return ((imgs+1)*127.5).transpose(1,2).transpose(2,3).detach().cpu().numpy()
             info = { 'train/ori_imgs':img2photo(imgs),
                      'train/coarse_imgs':img2photo(coarse_imgs),
                      'train/recon_imgs':img2photo(recon_imgs),
@@ -238,17 +239,17 @@ def main():
 
     for i in range(epoch):
         #train data
-        train(netG, netD, gan_loss, recon_loss, dis_loss, optG, optD, train_loader, epoch, device=cuda0)
+        train(netG, netD, gan_loss, recon_loss, dis_loss, optG, optD, train_loader, i, device=cuda0)
 
         # validate
-        validate(netG, netD, gan_Loss, recon_loss, dis_loss, optG, optD, val_loader, epoch, device=cuda0)
+        validate(netG, netD, gan_loss, recon_loss, dis_loss, optG, optD, val_loader, i, device=cuda0)
 
         torch.save({
-            'epoch': epoch + 1,
+            'epoch': i + 1,
             'netG_state_dict': netG.state_dict(),
             'netD_state_dict': netD.state_dict(),
             'optG' : optG.state_dict(),
             'optD' : optD.state_dict()
-        }, filename='epoch_{}_gateconv_snpgan_ckpt.pth.tar'.format(epoch+1))
+        }, '{}/epoch_{}_ckpt.pth.tar'.format(log_dir, i+1))
 if __name__ == '__main__':
     main()
