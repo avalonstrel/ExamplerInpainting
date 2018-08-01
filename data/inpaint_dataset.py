@@ -2,11 +2,17 @@ import torch
 from torch.utils.data import Dataset
 from torchvision import transforms
 from PIL import Image
-from .base_dataset import BaseDataset
+from .base_dataset import BaseDataset, NoriBaseDataset
+
+import numpy as np
+import cv2
+
 ALLMASKTYPES = ['bbox', 'seg', 'random']
 
 
-def InpaintDataset(BaseDataset):
+
+
+class InpaintDataset(BaseDataset):
     """
     Dataset for Inpainting task
     Params:
@@ -22,7 +28,9 @@ def InpaintDataset(BaseDataset):
         img, *mask
     """
     def __init__(self, img_flist_path, mask_flist_paths_dict,
-                resize_shape=(256, 256), transforms_oprs=['random_crop', 'to_tensor'], random_bbox_shape=(32, 32), random_bbox_margin=(64, 64)):
+                resize_shape=(256, 256), transforms_oprs=['random_crop', 'to_tensor'],
+                random_bbox_shape=(32, 32), random_bbox_margin=(64, 64),
+                random_ff_setting={'mv':5, 'ma':4.0, 'ml':40, 'mbw':10}):
 
         with open(img_flist_path, 'r') as f:
             self.img_paths = f.read().splitlines()
@@ -30,13 +38,16 @@ def InpaintDataset(BaseDataset):
         self.mask_paths = {}
         for mask_type in mask_flist_paths_dict:
             assert mask_type in ALLMASKTYPES
-            if mask_type == 'random':
+            if 'random' in mask_type:
                 self.mask_paths[mask_type] = ['' for i in self.img_paths]
-            with open(mask_flist_paths_dict[mask_type]) as f:
-                self.mask_paths[mask_type] = f.read().splitlines()
+            else:
+                with open(mask_flist_paths_dict[mask_type]) as f:
+                    self.mask_paths[mask_type] = f.read().splitlines()
 
         self.resize_shape = resize_shape
         self.random_bbox_shape = random_bbox_shape
+        self.random_bbox_margin = random_bbox_margin
+        self.random_ff_setting = random_ff_setting
         self.transform_initialize(resize_shape, transforms_oprs)
 
 
@@ -52,19 +63,30 @@ def InpaintDataset(BaseDataset):
         for mask_type in self.mask_paths:
             mask_paths[mask_type] = self.mask_paths[mask_type][index]
 
-        img = self.transforms_fun(read_img(img_path))
-        masks = {mask_type:self.transforms_fun(bbox2mask(read_mask(mask_paths[mask_type], mask_type))) for mask_type in mask_paths}
+        img = self.transforms_fun(self.read_img(img_path))
+        masks = {mask_type:self.transforms_fun(self.read_mask(mask_paths[mask_type], mask_type)) for mask_type in mask_paths}
 
-        return img, masks
+        return img*255, masks*255
+
+    def read_img(self, path):
+        """
+        Read Image
+        """
+        img = Image.open(path)
+        return img
 
 
-    @staticmethod
-    def read_mask(path, mask_type):
+    def read_mask(self, path, mask_type):
         """
         Read Masks now only support bbox
         """
         if mask_type == 'random':
-            bbox = random_bbox(self.resize_shape, self.random_bbox_shape)
+            bbox = InpaintDataset.random_bbox(self.resize_shape, self.random_bbox_margin, self.random_bbox_shape)
+        elif mask_type == 'random_free_form':
+            mask = InpaintDataset.random_ff_mask(self.random_ff_setting)
+        else:
+            bbox = InpaintDataset.read_bbox(path)
+        return bbox2mask(bbox, self.resize_shape)
 
     @staticmethod
     def read_bbox(path):
@@ -74,11 +96,11 @@ def InpaintDataset(BaseDataset):
             bbox:[y,x,height, width], shape: (height, width)
         """
         if filename[-3:] == 'pkl' and 'Human' in filename:
-            return read_bbox_ch(filename)
+            return InpaintDataset.read_bbox_ch(filename)
         elif filename[-3:] == 'pkl' and 'COCO' in filename:
-            return read_bbox_pkl(filename)
+            return InpaintDataset.read_bbox_pkl(filename)
         else:
-            return read_bbox_xml(path)
+            return InpaintDataset.read_bbox_xml(path)
 
     @staticmethod
     def read_bbox_xml(path):
@@ -161,13 +183,45 @@ def InpaintDataset(BaseDataset):
         ver_margin, hor_margin = margin
         maxt = img_height - ver_margin - height
         maxl = img_width - hor_margin - width
-        t = tf.random_uniform(
-            [], minval=ver_margin, maxval=maxt, dtype=tf.int32)
-        l = tf.random_uniform(
-            [], minval=hor_margin, maxval=maxl, dtype=tf.int32)
-        h = tf.constant(height)
-        w = tf.constant(width)
+        t = np.random.randint(low=ver_margin, high=maxt)
+        l = np.random.randint(low=hor_margin, high=maxl)
+        h = height
+        w = width
         return (t, l, h, w)
+
+    @staticmethod
+    def random_ff_mask(config):
+        """Generate a random free form mask with configuration.
+
+        Args:
+            config: Config should have configuration including IMG_SHAPES,
+                VERTICAL_MARGIN, HEIGHT, HORIZONTAL_MARGIN, WIDTH.
+
+        Returns:
+            tuple: (top, left, height, width)
+
+        """
+
+        h,w = img_shape
+        mask = np.zeros((h,w))
+        num_v = 8+np.random.randint(config['mv'])#tf.random_uniform([], minval=0, maxval=config.MAXVERTEX, dtype=tf.int32)
+
+        for i in range(num_v):
+            start_x = np.random.randint(w)
+            start_y = np.random.randint(h)
+            for j in range(1+np.random.randint(5)):
+                angle = 0.01+np.random.randint(config['ma'])
+                if i % 2 == 0:
+                    angle = 2 * 3.1415926 - angle
+                length = 10+np.random.randint(config['ml'])
+                brush_w = 10+np.random.randint(config['mbw'])
+                end_x = (start_x + length * np.sin(angle)).astype(np.int32)
+                end_y = (start_y + length * np.cos(angle)).astype(np.int32)
+
+                cv2.line(mask, (start_y, start_x), (end_y, end_x), 1.0, brush_w)
+                start_x, start_y = end_x, end_y
+        return mask.reshape(mask.shape+(1,)).astype(np.float32)
+
 
     @staticmethod
     def bbox2mask(bbox, shape):
@@ -189,3 +243,87 @@ def InpaintDataset(BaseDataset):
         mask[bbox[0]+h:bbox[0]+bbox[2]-h,
              bbox[1]+w:bbox[1]+bbox[3]-w, :] = 1.
         return mask
+
+class NoriInpaintDataset(NoriBaseDataset):
+    """
+    Dataset for Inpainting task but use nori instead images
+    Params:
+        img_nori_list_path(str): The file which contains img file path list (e.g. test.flist)
+        mask_nori_list_paths_dict(dict): The dict contain the files which contains the pkl or xml file path for
+                                generate mask. And the key represent the mask type (e.g. {"bbox":"bbox_flist.txt", "seg":..., "random":None})
+        resize_shape(tuple): The shape of the final image (default:(256,256))
+        transforms_oprs(list) : Determine which transformation used on the imgae (default:['random_crop', 'to_tensor'])
+        random_bbox_shape(tuple): if use random bbox mask, it define the shape of the mask (default:(32,32))
+        random_bbox_margin(tuple): if use random bbox, it define the margin of the bbox which means the distance between the mask and the margin of the image
+                                    (default:(64,64))
+    Return:
+        img, *mask
+    """
+    def __init__(self, img_nori_list_path, img_nori_path, mask_flist_paths_dict,
+                resize_shape=(256, 256), transforms_oprs=['random_crop', 'to_tensor', 'norm'], random_bbox_shape=(32, 32), random_bbox_margin=(64, 64)):
+
+        self.img_nori_list, self.img_cls_ids, self.img_nr = self.initialize_nori(img_nori_list_path, img_nori_path)
+
+        # self.mask_nori_lists = {}
+        # self.mask_nrs = {}
+        # for mask_type in mask_nori_list_paths_dict:
+        #     assert mask_type in ALLMASKTYPES
+        #     if mask_type == 'random':
+        #         self.mask_paths[mask_type] = ['' for i in self.img_nori_list]
+        #     self.mask_nori_lists[mask_type], _, self.mask_nrs[mask_type] = self.initialize_nori(mask_nori_list_paths_dict[mask_type])
+        self.mask_paths = {}
+        for mask_type in mask_flist_paths_dict:
+            assert mask_type in ALLMASKTYPES
+            if mask_type == 'random':
+                self.mask_paths[mask_type] = ['' for i in self.img_nori_list]
+            else:
+                with open(mask_flist_paths_dict[mask_type]) as f:
+                    self.mask_paths[mask_type] = f.read().splitlines()
+
+        self.resize_shape = resize_shape
+        self.random_bbox_shape = random_bbox_shape
+        self.random_bbox_margin = random_bbox_margin
+        self.transform_initialize(resize_shape, transforms_oprs)
+
+    def __len__(self):
+        return len(self.img_nori_list)
+
+    def read_mask(self, path, mask_type):
+        """
+        Read Masks now only support bbox
+        """
+        if mask_type == 'random':
+            bbox = InpaintDataset.random_bbox(self.resize_shape, self.random_bbox_margin, self.random_bbox_shape)
+        else:
+            bbox = InpaintDataset.read_bbox(path)
+        mask = np.tile((InpaintDataset.bbox2mask(bbox, self.resize_shape)*255).astype(np.uint8), (1,1,3))
+        #print(mask.shape)
+        #print(mask)
+        return Image.fromarray(mask)
+
+    def read_img(self, nori_id):
+        """
+        Read Images
+        """
+
+        img_bytes = self.img_nr.get(nori_id)
+        nparr = np.fromstring(img_bytes, np.uint8)
+        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+
+        return Image.fromarray(np.array(img)[:,:,::-1])
+
+    def __getitem__(self, index):
+        # create the paths for images and masks
+        try:
+            img_path = self.img_nori_list[index]
+            mask_paths = {}
+            for mask_type in self.mask_paths:
+                mask_paths[mask_type] = self.mask_paths[mask_type][index]
+
+            img = self.transforms_fun(self.read_img(img_path))
+            masks = {mask_type:self.transforms_fun(self.read_mask(mask_paths[mask_type], mask_type)) for mask_type in mask_paths}
+
+            return img, masks, self.img_cls_ids[index]
+        except:
+            #print("error")
+            return self.__getitem__(index-1)

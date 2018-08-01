@@ -1,14 +1,24 @@
 # Code referenced from https://gist.github.com/gyglim/1f8dfb1b5c82627ae3efcfbbadb9f514
 import tensorflow as tf
 import numpy as np
+import tqdm
 import scipy.misc
 try:
     from StringIO import StringIO  # Python 2.7
 except ImportError:
     from io import BytesIO         # Python 3.x
 
+class ProcessBar:
+    def __init__(self, n_epochs, ncols=50):
+        self.pbar = tqdm.tqdm(range(n_epochs), ncols=ncols)
 
-class Logger(object):
+    def update(self, text):
+        self.pbar.set_description(text)
+
+
+
+
+class TensorBoardLogger(object):
 
     def __init__(self, log_dir):
         """Create a summary writer logging to log_dir."""

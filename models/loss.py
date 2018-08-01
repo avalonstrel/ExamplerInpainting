@@ -1,2 +1,40 @@
 import torch
 import numpy as np
+import torch.nn.functional as F
+
+class SNDisLoss(torch.nn.Module):
+    """
+    The loss for sngan discriminator
+    """
+    def __init__(self, weight=1):
+        self.weight = weight
+
+    def __forward__(self, pos, neg):
+        return self.weight * (torch.mean(F.relu(1-pos)) + torch.mean(F.relu(1+neg)))
+
+
+class SNGenLoss(torch.nn.Module):
+    """
+    The loss for sngan generator
+    """
+    def __init__(self, weight=1):
+        self.weight = weight
+
+    def __forward__(self, neg):
+        return - self.weight * torch.mean(neg)
+
+class ReconLoss(torch.nn.Module):
+    """
+    Reconstruction loss contain l1 loss, may contain perceptual loss
+    """
+    def __init__(self, chole_alpha, cunhole_alpha, rhole_alpha, runhole_alpha):
+        self.chole_alpha = chole_alpha
+        self.cunhole_alpha = cunhole_alpha
+        self.rhole_alpha = rhole_alpha
+        self.runhole_alpha = runhole_alpha
+
+    def forward(self, imgs, coarse_imgs, recon_imgs, masks):
+        return self.rhole_alpha*torch.mean((imgs - recon_imgs) * masks) / torch.mean(masks) + \
+                self.runhole_alpha*torch.mean((imgs - recon_imgs) * (1. - masks)) / torch.mean((1-masks)) + \
+                self.chole_alpha*torch.mean((imgs - coarse_imgs) * masks) / torch.mean(masks) + \
+                self.cunhole_alpha*torch.mean((imgs - coarse_imgs) * (1. - masks)) / torch.mean((1-masks))
