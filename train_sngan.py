@@ -48,6 +48,8 @@ def validate(netG, netD, GANLoss, ReconLoss, DLoss, optG, optD, dataloader, epoc
     for i, (imgs, masks) in enumerate(dataloader):
         data_time.update(time.time() - end)
         masks = masks['random_free_form']
+        #masks = (masks > 0).type(torch.FloatTensor)
+
         imgs, masks = imgs.to(device), masks.to(device)
         imgs = (imgs / 127.5 - 1)
         # mask is 1 on masked region
@@ -82,9 +84,9 @@ def validate(netG, netD, GANLoss, ReconLoss, DLoss, optG, optD, dataloader, epoc
 
 
         # Logger logging
-        logger.info("Validation Epoch {0}, [{1}/{2}]: Whole Gen Loss{whole_loss.val:.4f}\t,"
+        logger.info("Validation Epoch {0}, [{1}/{2}]: Batch Time:{batch_time.val:.4f},\t Data Time:{data_time.val:.4f},\t Whole Gen Loss:{whole_loss.val:.4f}\t,"
                     "Recon Loss:{r_loss.val:.4f},\t GAN Loss:{g_loss.val:.4f},\t D Loss:{d_loss.val:.4f}"
-                    .format(epoch, i, len(dataloader), whole_loss=losses['whole_loss'], r_loss=losses['r_loss'] \
+                    .format(epoch, i, len(dataloader), batch_time=batch_time, data_time=data_time, whole_loss=losses['whole_loss'], r_loss=losses['r_loss'] \
                     ,g_loss=losses['g_loss'], d_loss=losses['d_loss']))
 
         if i*config.BATCH_SIZE < config.STATIC_VIEW_SIZE:
@@ -118,9 +120,11 @@ def train(netG, netD, GANLoss, ReconLoss, DLoss, optG, optD, dataloader, epoch, 
     for i, (imgs, masks) in enumerate(dataloader):
         data_time.update(time.time() - end)
         masks = masks['random_free_form']
+        #masks = (masks > 0).type(torch.FloatTensor)#
+        #print(len([i for i in masks.numpy().flatten() if i != 0]))
 
         # Optimize Discriminator
-        optD.zero_grad(), netD.zero_grad()
+        optD.zero_grad(), netD.zero_grad(), netG.zero_grad(), optG.zero_grad()
 
         imgs, masks = imgs.to(device), masks.to(device)
         imgs = (imgs / 127.5 - 1)
@@ -144,9 +148,9 @@ def train(netG, netD, GANLoss, ReconLoss, DLoss, optG, optD, dataloader, epoch, 
 
 
         # Optimize Generator
-        optG.zero_grad(), netG.zero_grad()
-        pred_pos_neg = netD(pos_neg_imgs)
-        pred_pos, pred_neg = torch.chunk(pred_pos_neg,  2, dim=0)
+        optD.zero_grad(), netD.zero_grad(), optG.zero_grad(), netG.zero_grad()
+        pred_neg = netD(neg_imgs)
+        #pred_pos, pred_neg = torch.chunk(pred_pos_neg,  2, dim=0)
         g_loss = GANLoss(pred_neg)
         r_loss = ReconLoss(imgs, coarse_imgs, recon_imgs, masks)
 
@@ -167,9 +171,9 @@ def train(netG, netD, GANLoss, ReconLoss, DLoss, optG, optD, dataloader, epoch, 
 
         if i % config.SUMMARY_FREQ == 0:
             # Logger logging
-            logger.info("Epoch {0}, [{1}/{2}]: Whole Gen Loss{whole_loss.val:.4f}\t,"
+            logger.info("Epoch {0}, [{1}/{2}]: Batch Time:{batch_time.val:.4f},\t Data Time:{data_time.val:.4f}, Whole Gen Loss:{whole_loss.val:.4f}\t,"
                         "Recon Loss:{r_loss.val:.4f},\t GAN Loss:{g_loss.val:.4f},\t D Loss:{d_loss.val:.4f}" \
-                        .format(epoch, i, len(dataloader), whole_loss=losses['whole_loss'], r_loss=losses['r_loss'] \
+                        .format(epoch, i, len(dataloader), batch_time=batch_time, data_time=data_time, whole_loss=losses['whole_loss'], r_loss=losses['r_loss'] \
                         ,g_loss=losses['g_loss'], d_loss=losses['d_loss']))
             # Tensorboard logger for scaler and images
             info_terms = {'WGLoss':whole_loss.item(), 'ReconLoss':r_loss.item(), "GANLoss":g_loss.item(), "DLoss":d_loss.item()}
@@ -229,7 +233,7 @@ def main():
     dis_loss = SNDisLoss()
     lr, decay = config.LEARNING_RATE, config.WEIGHT_DECAY
     optG = torch.optim.Adam(netG.parameters(), lr=lr, weight_decay=decay)
-    optD = torch.optim.Adam(netD.parameters(), lr=lr, weight_decay=decay)
+    optD = torch.optim.Adam(netD.parameters(), lr=4*lr, weight_decay=decay)
 
     logger.info("Finish Define the Network Structure and Losses")
 

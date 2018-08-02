@@ -11,7 +11,8 @@ class SNDisLoss(torch.nn.Module):
         self.weight = weight
 
     def forward(self, pos, neg):
-        return self.weight * (torch.mean(F.relu(1-pos)) + torch.mean(F.relu(1+neg)))
+        #return self.weight * (torch.sum(F.relu(-1+pos)) + torch.sum(F.relu(-1-neg)))/pos.size(0)
+        return self.weight * (torch.mean(F.relu(1.-pos)) + torch.mean(F.relu(1.+neg)))
 
 
 class SNGenLoss(torch.nn.Module):
@@ -37,7 +38,7 @@ class ReconLoss(torch.nn.Module):
         self.runhole_alpha = runhole_alpha
 
     def forward(self, imgs, coarse_imgs, recon_imgs, masks):
-        return self.rhole_alpha*torch.mean(torch.abs(imgs - recon_imgs) * masks) / torch.mean(masks) + \
-                self.runhole_alpha*torch.mean(torch.abs(imgs - recon_imgs) * (1. - masks)) / torch.mean((1-masks)) + \
-                self.chole_alpha*torch.mean(torch.abs(imgs - coarse_imgs) * masks) / torch.mean(masks) + \
-                self.cunhole_alpha*torch.mean(torch.abs(imgs - coarse_imgs) * (1. - masks)) / torch.mean((1-masks))
+        return self.rhole_alpha*torch.mean(torch.abs(imgs - recon_imgs) * masks) + \
+                self.runhole_alpha*torch.mean(torch.abs(imgs - recon_imgs) * (1. - masks))  + \
+                self.chole_alpha*torch.mean(torch.abs(imgs - coarse_imgs) * masks)  + \
+                self.cunhole_alpha*torch.mean(torch.abs(imgs - coarse_imgs) * (1. - masks))

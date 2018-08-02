@@ -60,10 +60,17 @@ class InpaintDataset(BaseDataset):
 
     def __getitem__(self, index):
         # create the paths for images and masks
+
         img_path = self.img_paths[index]
-        while not os.path.isfile(img_path):
+        error = 0
+        while not os.path.isfile(img_path) or error == 1:
             index = np.random.randint(0, high=len(self))
             img_path = self.img_paths[index]
+            try:
+                img = self.read_img(img_path)
+                error = 0
+            except:
+                error = 1
         mask_paths = {}
         for mask_type in self.mask_paths:
             mask_paths[mask_type] = self.mask_paths[mask_type][index]

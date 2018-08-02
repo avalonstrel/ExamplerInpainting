@@ -5,6 +5,8 @@ import numpy as np
 import cv2
 from .networks import GatedConv2dWithActivation, GatedDeConv2dWithActivation, SNConvWithActivation, get_pad
 
+
+
 class InpaintGCNet(torch.nn.Module):
     """
     Inpaint generator, input should be 5*256*256, where 3*256*256 is the masked image, 1*256*256 for mask, 1*256*256 is the guidence
@@ -64,6 +66,10 @@ class InpaintGCNet(torch.nn.Module):
             GatedConv2dWithActivation(cnum//2, 3, 3, 1, padding=get_pad(256, 3, 1), activation=None),
         )
 
+        # self.coarse_net = nn.utils.spectral_norm(self.coarse_net)
+        # self.refine_conv_net = nn.utils.spectral_norm(self.refine_conv_net)
+        # self.refine_upsample_net = nn.utils.spectral_norm(self.refine_upsample_net)
+
 
     def forward(self, imgs, masks):
         masked_imgs =  imgs * (1 - masks) + masks
@@ -83,15 +89,18 @@ class InpaintDirciminator(nn.Module):
         super(InpaintDirciminator, self).__init__()
         cnum = 32
         self.discriminator_net = nn.Sequential(
-            SNConvWithActivation(5, 2*cnum, 5, 2, padding=get_pad(256, 5, 2)),
-            SNConvWithActivation(2*cnum, 4*cnum, 5, 2, padding=get_pad(128, 5, 2)),
-            SNConvWithActivation(4*cnum, 8*cnum, 5, 2, padding=get_pad(64, 5, 2)),
-            SNConvWithActivation(8*cnum, 8*cnum, 5, 2, padding=get_pad(32, 5, 2)),
-            SNConvWithActivation(8*cnum, 8*cnum, 5, 2, padding=get_pad(16, 5, 2)),
-            SNConvWithActivation(8*cnum, 8*cnum, 5, 2, padding=get_pad(8, 5, 2)),
-            SNConvWithActivation(8*cnum, 8*cnum, 5, 2, padding=get_pad(4, 5, 2)),
+            SNConvWithActivation(5, 2*cnum, 4, 2, padding=get_pad(256, 5, 2)),
+            SNConvWithActivation(2*cnum, 4*cnum, 4, 2, padding=get_pad(128, 5, 2)),
+            SNConvWithActivation(4*cnum, 8*cnum, 4, 2, padding=get_pad(64, 5, 2)),
+            SNConvWithActivation(8*cnum, 8*cnum, 4, 2, padding=get_pad(32, 5, 2)),
+            SNConvWithActivation(8*cnum, 8*cnum, 4, 2, padding=get_pad(16, 5, 2)),
+            SNConvWithActivation(8*cnum, 8*cnum, 4, 2, padding=get_pad(8, 5, 2)),
+            SNConvWithActivation(8*cnum, 8*cnum, 4, 2, padding=get_pad(4, 5, 2)),
         )
+        self.linear = nn.Linear(8*cnum*2*2, 1)
 
     def forward(self, input):
         x = self.discriminator_net(input)
+        x = x.view((x.size(0),-1))
+        #x = self.linear(x)
         return x
