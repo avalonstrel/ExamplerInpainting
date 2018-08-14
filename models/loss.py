@@ -38,7 +38,7 @@ class ReconLoss(torch.nn.Module):
         self.runhole_alpha = runhole_alpha
 
     def forward(self, imgs, coarse_imgs, recon_imgs, masks):
-        return self.rhole_alpha*torch.mean(torch.abs(imgs - recon_imgs) * masks) + \
-                self.runhole_alpha*torch.mean(torch.abs(imgs - recon_imgs) * (1. - masks))  + \
-                self.chole_alpha*torch.mean(torch.abs(imgs - coarse_imgs) * masks)  + \
-                self.cunhole_alpha*torch.mean(torch.abs(imgs - coarse_imgs) * (1. - masks))
+        return self.rhole_alpha*torch.mean(torch.abs(imgs - recon_imgs) * masks) / masks.mean() + \
+                self.runhole_alpha*torch.mean(torch.abs(imgs - recon_imgs) * (1. - masks)) / (1. - masks).mean() + \
+                self.chole_alpha*torch.mean(torch.abs(imgs - coarse_imgs) * masks) / masks.mean()  + \
+                self.cunhole_alpha*torch.mean(torch.abs(imgs - coarse_imgs) * (1. - masks)) / (1-masks.mean())

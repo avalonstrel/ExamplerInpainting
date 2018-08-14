@@ -11,8 +11,6 @@ from torch.utils.data import Dataset
 ALLMASKTYPES = ['bbox', 'seg', 'random', 'random_free_form']
 
 
-
-
 class InpaintDataset(BaseDataset):
     """
     Dataset for Inpainting task
@@ -62,15 +60,16 @@ class InpaintDataset(BaseDataset):
         # create the paths for images and masks
 
         img_path = self.img_paths[index]
-        error = 0
+        error = 1
         while not os.path.isfile(img_path) or error == 1:
-            index = np.random.randint(0, high=len(self))
-            img_path = self.img_paths[index]
             try:
-                img = self.read_img(img_path)
+                img = self.transforms_fun(self.read_img(img_path))
                 error = 0
             except:
+                index = np.random.randint(0, high=len(self))
+                img_path = self.img_paths[index]
                 error = 1
+
         mask_paths = {}
         for mask_type in self.mask_paths:
             mask_paths[mask_type] = self.mask_paths[mask_type][index]
@@ -97,7 +96,7 @@ class InpaintDataset(BaseDataset):
             bbox = InpaintDataset.random_bbox(self.resize_shape, self.random_bbox_margin, self.random_bbox_shape)
         elif mask_type == 'random_free_form':
             mask = InpaintDataset.random_ff_mask(self.random_ff_setting)
-            return Image.fromarray(np.tile(mask*255,(1,1,3)).astype(np.uint8))
+            return Image.fromarray(np.tile(mask,(1,1,3)).astype(np.uint8))
         else:
             bbox = InpaintDataset.read_bbox(path)
         return InpaintDataset.bbox2mask(bbox, self.resize_shape)
@@ -328,16 +327,22 @@ class NoriInpaintDataset(NoriBaseDataset):
 
     def __getitem__(self, index):
         # create the paths for images and masks
-        try:
-            img_path = self.img_nori_list[index]
-            mask_paths = {}
-            for mask_type in self.mask_paths:
-                mask_paths[mask_type] = self.mask_paths[mask_type][index]
+        img_path = self.img_nori_list[index]
+        error = 1
+        while not os.path.isfile(img_path) or error == 1:
+            try:
+                img = self.transforms_fun(self.read_img(img_path))
+                error = 0
+            except:
+                index = np.random.randint(0, high=len(self))
+                img_path = self.img_nori_list[index]
+                error = 1
 
-            img = self.transforms_fun(self.read_img(img_path))
-            masks = {mask_type:self.transforms_fun(self.read_mask(mask_paths[mask_type], mask_type)) for mask_type in mask_paths}
+        mask_paths = {}
+        for mask_type in self.mask_paths:
+            mask_paths[mask_type] = self.mask_paths[mask_type][index]
 
-            return img, masks, self.img_cls_ids[index]
-        except:
-            #print("error")
-            return self.__getitem__(index-1)
+        img = self.transforms_fun(self.read_img(img_path))
+        masks = {mask_type:self.transforms_fun(self.read_mask(mask_paths[mask_type], mask_type)) for mask_type in mask_paths}
+
+        return img, masks, self.img_cls_ids[index]

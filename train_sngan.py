@@ -92,10 +92,11 @@ def validate(netG, netD, GANLoss, ReconLoss, DLoss, optG, optD, dataloader, epoc
         if i*config.BATCH_SIZE < config.STATIC_VIEW_SIZE:
             def img2photo(imgs):
                 return ((imgs+1)*127.5).transpose(1,2).transpose(2,3).detach().cpu().numpy()
-            info = { 'val/ori_imgs':img2photo(imgs),
-                     'val/coarse_imgs':img2photo(coarse_imgs),
-                     'val/recon_imgs':img2photo(recon_imgs),
-                     'val/comp_imgs':img2photo(complete_imgs),
+            # info = { 'val/ori_imgs':img2photo(imgs),
+            #          'val/coarse_imgs':img2photo(coarse_imgs),
+            #          'val/recon_imgs':img2photo(recon_imgs),
+            #          'val/comp_imgs':img2photo(complete_imgs),
+            info = {
                      'val/whole_imgs':img2photo(torch.cat([imgs, coarse_imgs, recon_imgs, complete_imgs], dim=3))
                      }
 
@@ -186,10 +187,11 @@ def train(netG, netD, GANLoss, ReconLoss, DLoss, optG, optD, dataloader, epoch, 
 
             def img2photo(imgs):
                 return ((imgs+1)*127.5).transpose(1,2).transpose(2,3).detach().cpu().numpy()
-            info = { 'train/ori_imgs':img2photo(imgs),
-                     'train/coarse_imgs':img2photo(coarse_imgs),
-                     'train/recon_imgs':img2photo(recon_imgs),
-                     'train/comp_imgs':img2photo(complete_imgs),
+            # info = { 'train/ori_imgs':img2photo(imgs),
+            #          'train/coarse_imgs':img2photo(coarse_imgs),
+            #          'train/recon_imgs':img2photo(recon_imgs),
+            #          'train/comp_imgs':img2photo(complete_imgs),
+            info = {
                      'train/whole_imgs':img2photo(torch.cat([imgs, coarse_imgs, recon_imgs, complete_imgs], dim=3))
                      }
 
