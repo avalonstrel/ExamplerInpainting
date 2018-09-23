@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 log_dir = 'model_logs/{}_{}'.format(time.strftime('%Y%m%d%H%M', time.localtime(time.time())), config.LOG_DIR)
 tensorboardlogger = TensorBoardLogger(log_dir)
 cuda0 = torch.device('cuda:{}'.format(config.GPU_ID))
-#cuda0 = torch.device('cpu')
+cpu0 = torch.device('cpu')
 
 def logger_init():
     """
@@ -32,10 +32,12 @@ def logger_init():
     logger.addHandler(fh)
 
 
-def validate(netG, netD, GANLoss, ReconLoss, DLoss, optG, optD, dataloader, epoch, device=cuda0):
+def validate(netG, netD, GANLoss, ReconLoss, DLoss, optG, optD, dataloader, epoch, device=cuda0, val_num=30):
     """
     validate phase
     """
+    netG.to(device)
+    netD.to(device)
     netG.eval()
     netD.eval()
     batch_time = AverageMeter()
@@ -46,6 +48,8 @@ def validate(netG, netD, GANLoss, ReconLoss, DLoss, optG, optD, dataloader, epoc
     netD.train()
     end = time.time()
     for i, (imgs, masks) in enumerate(dataloader):
+        if i > val_num:
+            break
         data_time.update(time.time() - end)
         masks = masks['random_free_form']
         #masks = (masks > 0).type(torch.FloatTensor)
@@ -97,7 +101,7 @@ def validate(netG, netD, GANLoss, ReconLoss, DLoss, optG, optD, dataloader, epoc
             #          'val/recon_imgs':img2photo(recon_imgs),
             #          'val/comp_imgs':img2photo(complete_imgs),
             info = {
-                     'val/whole_imgs':img2photo(torch.cat([imgs, coarse_imgs, recon_imgs, complete_imgs], dim=3))
+                     'val/whole_imgs':img2photo(torch.cat([imgs, imgs * (1 - masks), coarse_imgs, recon_imgs, complete_imgs], dim=3))
                      }
 
             for tag, images in info.items():
@@ -111,6 +115,8 @@ def train(netG, netD, GANLoss, ReconLoss, DLoss, optG, optD, dataloader, epoch, 
     Free-Form Image Inpainting with Gated Convolution (snpgan)
 
     """
+    netG.to(device)
+    netD.to(device)
     batch_time = AverageMeter()
     data_time = AverageMeter()
     losses = {"g_loss":AverageMeter(), "r_loss":AverageMeter(), "whole_loss":AverageMeter(), 'd_loss':AverageMeter()}
@@ -121,8 +127,6 @@ def train(netG, netD, GANLoss, ReconLoss, DLoss, optG, optD, dataloader, epoch, 
     for i, (imgs, masks) in enumerate(dataloader):
         data_time.update(time.time() - end)
         masks = masks['random_free_form']
-        #masks = (masks > 0).type(torch.FloatTensor)#
-        #print(len([i for i in masks.numpy().flatten() if i != 0]))
 
         # Optimize Discriminator
         optD.zero_grad(), netD.zero_grad(), netG.zero_grad(), optG.zero_grad()
@@ -140,7 +144,6 @@ def train(netG, netD, GANLoss, ReconLoss, DLoss, optG, optD, dataloader, epoch, 
 
         pred_pos_neg = netD(pos_neg_imgs)
         pred_pos, pred_neg = torch.chunk(pred_pos_neg, 2, dim=0)
-        #print(pred_pos.size())
         d_loss = DLoss(pred_pos, pred_neg)
         losses['d_loss'].update(d_loss.item(), imgs.size(0))
         d_loss.backward(retain_graph=True)
@@ -192,7 +195,7 @@ def train(netG, netD, GANLoss, ReconLoss, DLoss, optG, optD, dataloader, epoch, 
             #          'train/recon_imgs':img2photo(recon_imgs),
             #          'train/comp_imgs':img2photo(complete_imgs),
             info = {
-                     'train/whole_imgs':img2photo(torch.cat([imgs, coarse_imgs, recon_imgs, complete_imgs], dim=3))
+                     'train/whole_imgs':img2photo(torch.cat([imgs, imgs * (1 - masks), coarse_imgs, recon_imgs, complete_imgs], dim=3))
                      }
 
             for tag, images in info.items():
@@ -212,28 +215,37 @@ def main():
                                       random_bbox_margin=config.RANDOM_BBOX_MARGIN,
                                       random_ff_setting=config.RANDOM_FF_SETTING)
     train_loader = train_dataset.loader(batch_size=batch_size, shuffle=True,
-                                            num_workers=16, pin_memory=True)
+                                            num_workers=16,pin_memory=True)
 
     val_dataset = InpaintDataset(config.DATA_FLIST[dataset_type][1],\
                                     {mask_type:config.DATA_FLIST[config.MASKDATASET][mask_type][1] for mask_type in config.MASK_TYPES}, \
                                     resize_shape=tuple(config.IMG_SHAPES), random_bbox_shape=config.RANDOM_BBOX_SHAPE, \
                                     random_bbox_margin=config.RANDOM_BBOX_MARGIN,
                                     random_ff_setting=config.RANDOM_FF_SETTING)
-    val_loader = val_dataset.loader(batch_size=batch_size, shuffle=False,
-                                        num_workers=16, pin_memory=True)
+    val_loader = val_dataset.loader(batch_size=1, shuffle=False,
+                                        num_workers=1)
     logger.info("Finish the dataset initialization.")
 
     # Define the Network Structure
     logger.info("Define the Network Structure and Losses")
     netG = InpaintGCNet()
     netD = InpaintDirciminator()
-    netG, netD = netG.to(cuda0), netD.to(cuda0)
+
+    if config.MODEL_RESTORE != '':
+        whole_model_path = 'model_logs/{}'.format( config.MODEL_RESTORE)
+        nets = torch.load(whole_model_path)
+        netG_state_dict, netD_state_dict = nets['netG_state_dict'], nets['netD_state_dict']
+        netG.load_state_dict(netG_state_dict)
+        netD.load_state_dict(netD_state_dict)
+        logger.info("Loading pretrained models from {} ...".format(config.MODEL_RESTORE))
+    #netG, netD = netG.to(cuda0), netD.to(cuda0)
 
     # Define loss
     recon_loss = ReconLoss(*(config.L1_LOSS_ALPHA))
     gan_loss = SNGenLoss(config.GAN_LOSS_ALPHA)
     dis_loss = SNDisLoss()
     lr, decay = config.LEARNING_RATE, config.WEIGHT_DECAY
+    #print(netG.parameters())
     optG = torch.optim.Adam(netG.parameters(), lr=lr, weight_decay=decay)
     optD = torch.optim.Adam(netD.parameters(), lr=4*lr, weight_decay=decay)
 
@@ -244,18 +256,22 @@ def main():
     epoch = 50
 
     for i in range(epoch):
+        #validate(netG, netD, gan_loss, recon_loss, dis_loss, optG, optD, val_loader, i, device=cuda0)
+
         #train data
         train(netG, netD, gan_loss, recon_loss, dis_loss, optG, optD, train_loader, i, device=cuda0)
 
         # validate
         validate(netG, netD, gan_loss, recon_loss, dis_loss, optG, optD, val_loader, i, device=cuda0)
 
-        torch.save({
+        saved_model = {
             'epoch': i + 1,
-            'netG_state_dict': netG.state_dict(),
-            'netD_state_dict': netD.state_dict(),
-            'optG' : optG.state_dict(),
-            'optD' : optD.state_dict()
-        }, '{}/epoch_{}_ckpt.pth.tar'.format(log_dir, i+1))
+            'netG_state_dict': netG.to(cpu0).state_dict(),
+            'netD_state_dict': netD.to(cpu0).state_dict(),
+            # 'optG' : optG.state_dict(),
+            # 'optD' : optD.state_dict()
+        }
+        torch.save(saved_model, '{}/epoch_{}_ckpt.pth.tar'.format(log_dir, i+1))
+        torch.save(saved_model, '{}/latest_ckpt.pth.tar'.format(log_dir, i+1))
 if __name__ == '__main__':
     main()

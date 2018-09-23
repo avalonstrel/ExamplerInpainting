@@ -1,7 +1,31 @@
 import torch
 import numpy as np
 import torch.nn.functional as F
+import torch.nn as nn
 
+def init_weights(net, init_type='normal', gain=0.02):
+    from torch.nn import init
+    def init_func(m):
+        classname = m.__class__.__name__
+        if hasattr(m, 'weight') and (classname.find('Conv') != -1 or classname.find('Linear') != -1):
+            if init_type == 'normal':
+                init.normal(m.weight.data, 0.0, gain)
+            elif init_type == 'xavier':
+                init.xavier_normal(m.weight.data, gain=gain)
+            elif init_type == 'kaiming':
+                init.kaiming_normal(m.weight.data, a=0, mode='fan_in')
+            elif init_type == 'orthogonal':
+                init.orthogonal(m.weight.data, gain=gain)
+            else:
+                raise NotImplementedError('initialization method [%s] is not implemented' % init_type)
+            if hasattr(m, 'bias') and m.bias is not None:
+                init.constant(m.bias.data, 0.0)
+        elif classname.find('BatchNorm2d') != -1:
+            init.normal(m.weight.data, 1.0, gain)
+            init.constant(m.bias.data, 0.0)
+
+    print('initialize network with %s' % init_type)
+    net.apply(init_func)
 def get_pad(in_,  ksize, stride, atrous=1):
     out_ = np.ceil(float(in_)/stride)
     return int(((out_ - 1) * stride + atrous*(ksize-1) + 1 - in_)/2)
@@ -21,7 +45,9 @@ class GatedConv2dWithActivation(torch.nn.Module):
         self.mask_conv2d = torch.nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding, dilation, groups, bias)
         self.activation = activation
         self.sigmoid = torch.nn.Sigmoid()
-
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                nn.init.kaiming_normal_(m.weight)
     def forward(self, input):
         x = self.conv2d(input)
         mask = self.mask_conv2d(input)
@@ -60,7 +86,9 @@ class SNGatedConv2dWithActivation(torch.nn.Module):
         self.sigmoid = torch.nn.Sigmoid()
         self.conv2d = torch.nn.utils.spectral_norm(self.conv2d)
         self.mask_conv2d = torch.nn.utils.spectral_norm(self.mask_conv2d)
-
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                nn.init.kaiming_normal_(m.weight)
     def forward(self, input):
         x = self.conv2d(input)
         mask = self.mask_conv2d(input)
@@ -96,7 +124,9 @@ class SNConvWithActivation(torch.nn.Module):
         self.conv2d = torch.nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding, dilation, groups, bias)
         self.conv2d = torch.nn.utils.spectral_norm(self.conv2d)
         self.activation = activation
-
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                nn.init.kaiming_normal_(m.weight)
     def forward(self, input):
         x = self.conv2d(input)
         if self.activation is not None:

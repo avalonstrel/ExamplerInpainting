@@ -66,17 +66,15 @@ class InpaintGCNet(torch.nn.Module):
             GatedConv2dWithActivation(cnum//2, 3, 3, 1, padding=get_pad(256, 3, 1), activation=None),
         )
 
-        # self.coarse_net = nn.utils.spectral_norm(self.coarse_net)
-        # self.refine_conv_net = nn.utils.spectral_norm(self.refine_conv_net)
-        # self.refine_upsample_net = nn.utils.spectral_norm(self.refine_upsample_net)
-
 
     def forward(self, imgs, masks):
+        # Coarse
         masked_imgs =  imgs * (1 - masks) + masks
         input_imgs = torch.cat([masked_imgs, masks, torch.full_like(masks, 1.)], dim=1)
         x = self.coarse_net(input_imgs)
         x = torch.clamp(x, -1., 1.)
         coarse_x = x
+        # Refine
         masked_imgs = imgs * (1 - masks) + coarse_x * masks
         input_imgs = torch.cat([masked_imgs, masks, torch.full_like(masks, 1.)], dim=1)
         x = self.refine_conv_net(input_imgs)

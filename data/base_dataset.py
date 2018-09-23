@@ -2,7 +2,7 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 from PIL import Image
-import nori2 as nori
+#import nori2 as nori
 
 """
 Define a base dataset contains some function I always useself.
@@ -24,9 +24,8 @@ class BaseDataset(Dataset):
         """
         Initialize the transformation oprs and create transform function for img
         """
-        #print(crop_size)
         self.transforms_oprs = {}
-        self.transforms_oprs["hflip "]= transforms.RandomHorizontalFlip(0.5)
+        self.transforms_oprs["hflip"]= transforms.RandomHorizontalFlip(0.5)
         self.transforms_oprs["vflip"] = transforms.RandomVerticalFlip(0.5)
         self.transforms_oprs["random_crop"] = transforms.RandomCrop(crop_size)
         self.transforms_oprs["to_tensor"] = transforms.ToTensor()

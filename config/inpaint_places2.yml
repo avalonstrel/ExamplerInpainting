@@ -5,7 +5,7 @@ MASK_TYPES: ['random_free_form']
 RANDOM_CROP: False
 MASKFROMFILE: False
 LOG_DIR: full_model_places2_256
-MODEL_RESTORE: ''  # '20180115220926508503_jyugpu0_places2_NORMAL_wgan_gp_full_model'
+MODEL_RESTORE: '' #'201809200859_full_model_places2_256/epoch_1_ckpt.pth.tar'  # '20180115220926508503_jyugpu0_places2_NORMAL_wgan_gp_full_model'
 
 #overall setting
 GAN: 'sn_pgan'  # 'dcgan', 'lsgan', 'wgan_gp', 'one_wgan_gp'
@@ -37,8 +37,8 @@ GRADIENT_CLIP: False
 GRADIENT_CLIP_VALUE: 0.1
 SUMMARY_FREQ: 50
 VAL_SUMMARY_FREQ: 1
-LEARNING_RATE: 0.0000001
-WEIGHT_DECAY: 0.0000
+LEARNING_RATE: 0.0001
+WEIGHT_DECAY: 0.0
 
 #validate
 STATIC_VIEW_SIZE: 30
@@ -79,8 +79,8 @@ DATA_FLIST:
   ]
   # http://places2.csail.mit.edu/, please download the high-resolution dataset and use RANDOM_CROP: True
   places2: [
-    '../Data/PlacesData/train_list.txt',
-    '../Data/PlacesData/val_list.txt'
+    '/home/lhy/datasets/Places2/train_flist.txt',
+    '/home/lhy/datasets/Places2/val_flist.txt'
   ]
   # http://www.image-net.org/, please use RANDOM_CROP: True
   imagenet: [
