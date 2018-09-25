@@ -11,12 +11,12 @@ class InpaintGCNet(torch.nn.Module):
     """
     Inpaint generator, input should be 5*256*256, where 3*256*256 is the masked image, 1*256*256 for mask, 1*256*256 is the guidence
     """
-    def __init__(self):
+    def __init__(self, n_in_channel=5):
         super(InpaintGCNet, self).__init__()
         cnum = 32
         self.coarse_net = nn.Sequential(
             #input is 5*256*256, but it is full convolution network, so it can be larger than 256
-            GatedConv2dWithActivation(5, cnum, 5, 1, padding=get_pad(256, 5, 1)),
+            GatedConv2dWithActivation(n_in_channel, cnum, 5, 1, padding=get_pad(256, 5, 1)),
             # downsample 128
             GatedConv2dWithActivation(cnum, 2*cnum, 4, 2, padding=get_pad(256, 4, 2)),
             GatedConv2dWithActivation(2*cnum, 2*cnum, 3, 1, padding=get_pad(128, 3, 1)),
@@ -41,7 +41,7 @@ class InpaintGCNet(torch.nn.Module):
 
         self.refine_conv_net = nn.Sequential(
             # input is 5*256*256
-            GatedConv2dWithActivation(5, cnum, 5, 1, padding=get_pad(256, 5, 1)),
+            GatedConv2dWithActivation(n_in_channel, cnum, 5, 1, padding=get_pad(256, 5, 1)),
             # downsample
             GatedConv2dWithActivation(cnum, cnum, 4, 2, padding=get_pad(256, 4, 2)),
             GatedConv2dWithActivation(cnum, 2*cnum, 3, 1, padding=get_pad(128, 3, 1)),
@@ -67,16 +67,22 @@ class InpaintGCNet(torch.nn.Module):
         )
 
 
-    def forward(self, imgs, masks):
+    def forward(self, imgs, masks, img_exs=None):
         # Coarse
         masked_imgs =  imgs * (1 - masks) + masks
-        input_imgs = torch.cat([masked_imgs, masks, torch.full_like(masks, 1.)], dim=1)
+        if img_exs is None:
+            input_imgs = torch.cat([masked_imgs, masks, torch.full_like(masks, 1.)], dim=1)
+        else:
+            input_imgs = torch.cat([masked_imgs, img_exs, masks, torch.full_like(masks, 1.)], dim=1)
         x = self.coarse_net(input_imgs)
         x = torch.clamp(x, -1., 1.)
         coarse_x = x
         # Refine
         masked_imgs = imgs * (1 - masks) + coarse_x * masks
-        input_imgs = torch.cat([masked_imgs, masks, torch.full_like(masks, 1.)], dim=1)
+        if img_exs is None:
+            input_imgs = torch.cat([masked_imgs, masks, torch.full_like(masks, 1.)], dim=1)
+        else:
+            input_imgs = torch.cat([masked_imgs, img_exs, masks, torch.full_like(masks, 1.)], dim=1)
         x = self.refine_conv_net(input_imgs)
         x = self.refine_upsample_net(x)
         x = torch.clamp(x, -1., 1.)

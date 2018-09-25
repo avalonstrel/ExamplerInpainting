@@ -5,7 +5,7 @@ from models.gatedconv import InpaintGCNet, InpaintDirciminator
 from models.loss import SNDisLoss, SNGenLoss, ReconLoss
 from util.logger import TensorBoardLogger
 from util.config import Config
-from data.inpaint_dataset import InpaintDataset
+from data.inpaint_dataset import InpaintDataset, InpaintPairDataset
 from util.evaluation import AverageMeter
 
 import logging
@@ -59,7 +59,7 @@ def validate(netG, netD, GANLoss, ReconLoss, DLoss, optG, optD, dataloader, epoc
         imgs = (imgs / 127.5 - 1)
         # mask is 1 on masked region
         # forward
-        coarse_imgs, recon_imgs = netG(imgs, masks)
+        coarse_imgs, recon_imgs = netG(imgs, masks, img_exs=imgs)
 
         complete_imgs = recon_imgs * masks + imgs * (1 - masks)
 
@@ -125,17 +125,17 @@ def train(netG, netD, GANLoss, ReconLoss, DLoss, optG, optD, dataloader, epoch, 
     netG.train()
     netD.train()
     end = time.time()
-    for i, (imgs, masks) in enumerate(dataloader):
+    for i, (imgs, img_exs, masks) in enumerate(dataloader):
         data_time.update(time.time() - end)
         masks = masks['random_free_form']
 
         # Optimize Discriminator
         optD.zero_grad(), netD.zero_grad(), netG.zero_grad(), optG.zero_grad()
 
-        imgs, masks = imgs.to(device), masks.to(device)
+        imgs, img_exs, masks = imgs.to(device), img_exs.to(device), masks.to(device)
         imgs = (imgs / 127.5 - 1)
         # mask is 1 on masked region
-        coarse_imgs, recon_imgs = netG(imgs, masks)
+        coarse_imgs, recon_imgs = netG(imgs, masks, img_exs=img_exs)
 
         complete_imgs = recon_imgs * masks + imgs * (1 - masks)
 
@@ -210,7 +210,7 @@ def main():
 
     # Dataset setting
     logger.info("Initialize the dataset...")
-    train_dataset = InpaintDataset(config.DATA_FLIST[dataset_type][0],\
+    train_dataset = InpaintPairDataset(config.DATA_FLIST[dataset_type][0],\
                                       {mask_type:config.DATA_FLIST[config.MASKDATASET][mask_type][0] for mask_type in config.MASK_TYPES}, \
                                       resize_shape=tuple(config.IMG_SHAPES), random_bbox_shape=config.RANDOM_BBOX_SHAPE, \
                                       random_bbox_margin=config.RANDOM_BBOX_MARGIN,
@@ -229,7 +229,7 @@ def main():
 
     # Define the Network Structure
     logger.info("Define the Network Structure and Losses")
-    netG = InpaintGCNet()
+    netG = InpaintGCNet(n_in_channel=8)
     netD = InpaintDirciminator()
 
     if config.MODEL_RESTORE != '':
