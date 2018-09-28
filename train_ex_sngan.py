@@ -33,7 +33,7 @@ def logger_init():
     logger.addHandler(fh)
 
 
-def validate(netG, netD, GANLoss, ReconLoss, DLoss, optG, optD, dataloader, epoch, device=cuda0, val_num=30):
+def validate(netG, netD, GANLoss, ReconLoss, DLoss, optG, optD, dataloader, epoch, device=cuda0):
     """
     validate phase
     """
@@ -49,8 +49,6 @@ def validate(netG, netD, GANLoss, ReconLoss, DLoss, optG, optD, dataloader, epoc
     netD.train()
     end = time.time()
     for i, (imgs, masks) in enumerate(dataloader):
-        if i > val_num:
-            break
         data_time.update(time.time() - end)
         masks = masks['random_free_form']
         #masks = (masks > 0).type(torch.FloatTensor)
@@ -102,11 +100,13 @@ def validate(netG, netD, GANLoss, ReconLoss, DLoss, optG, optD, dataloader, epoc
             #          'val/recon_imgs':img2photo(recon_imgs),
             #          'val/comp_imgs':img2photo(complete_imgs),
             info = {
-                     'val/whole_imgs':img2photo(torch.cat([imgs, imgs * (1 - masks), coarse_imgs, recon_imgs, complete_imgs], dim=3))
+                     'val/whole_imgs/{}'.format(i):img2photo(torch.cat([imgs, imgs * (1 - masks), coarse_imgs, recon_imgs, complete_imgs], dim=3))
                      }
 
             for tag, images in info.items():
-                tensorboardlogger.image_summary(tag, images, i)
+                tensorboardlogger.image_summary(tag, images, epoch)
+        else:
+            break
         end = time.time()
 
 
@@ -200,7 +200,9 @@ def train(netG, netD, GANLoss, ReconLoss, DLoss, optG, optD, dataloader, epoch, 
                      }
 
             for tag, images in info.items():
-                tensorboardlogger.image_summary(tag, images, i)
+                tensorboardlogger.image_summary(tag, images, epoch*len(dataloader)+i)
+        if i % config.VAL_SUMMARY_FREQ == 0:
+            pass
         end = time.time()
 
 def main():
@@ -223,7 +225,7 @@ def main():
                                     resize_shape=tuple(config.IMG_SHAPES), random_bbox_shape=config.RANDOM_BBOX_SHAPE, \
                                     random_bbox_margin=config.RANDOM_BBOX_MARGIN,
                                     random_ff_setting=config.RANDOM_FF_SETTING)
-    val_loader = val_dataset.loader(batch_size=1, shuffle=False,
+    val_loader = val_dataset.loader(batch_size=8, shuffle=False,
                                         num_workers=1)
     logger.info("Finish the dataset initialization.")
 

@@ -20,8 +20,8 @@ class InceptionV3(nn.Module):
 
     def __init__(self,
                  output_blocks=[DEFAULT_BLOCK_INDEX],
-                 resize_input=True,
-                 normalize_input=True,
+                 resize_input=False,
+                 normalize_input=False,
                  requires_grad=False):
         """Build pretrained InceptionV3
 
@@ -101,8 +101,8 @@ class InceptionV3(nn.Module):
             ]
             self.blocks.append(nn.Sequential(*block3))
 
-        for param in self.parameters():
-            param.requires_grad = requires_grad
+        # for param in self.parameters():
+        #     param.requires_grad = requires_grad
 
     def forward(self, inp):
         """Get Inception feature maps
@@ -121,21 +121,24 @@ class InceptionV3(nn.Module):
         outp = []
         x = inp
 
-        if self.resize_input:
-            x = F.upsample(x, size=(299, 299), mode='bilinear')
+        #if self.resize_input:
+        #    x = F.upsample(x, size=(299, 299), mode='bilinear')
 
-        if self.normalize_input:
-            x = x.clone()
-            x[:, 0] = x[:, 0] * (0.229 / 0.5) + (0.485 - 0.5) / 0.5
-            x[:, 1] = x[:, 1] * (0.224 / 0.5) + (0.456 - 0.5) / 0.5
-            x[:, 2] = x[:, 2] * (0.225 / 0.5) + (0.406 - 0.5) / 0.5
+        # if self.normalize_input:
+        #     x = x.clone()
+        #     x[:, 0] = x[:, 0] * (0.229 / 0.5) + (0.485 - 0.5) / 0.5
+        #     x[:, 1] = x[:, 1] * (0.224 / 0.5) + (0.456 - 0.5) / 0.5
+        #     x[:, 2] = x[:, 2] * (0.225 / 0.5) + (0.406 - 0.5) / 0.5
+        #print(x)
 
         for idx, block in enumerate(self.blocks):
+            #print(idx, block)
             x = block(x)
+            #print(x.size(), block)
             if idx in self.output_blocks:
                 outp.append(x)
 
             if idx == self.last_needed_block:
                 break
-
+        #print(x.size())
         return outp

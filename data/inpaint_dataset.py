@@ -106,7 +106,7 @@ class InpaintDataset(BaseDataset):
         """
         The general method for read bbox file by juding the file type
         Return:
-            bbox:[y,x,height, width], shape: (height, width)
+            bbox:[y, x, height, width], shape: (height, width)
         """
         if filename[-3:] == 'pkl' and 'Human' in filename:
             return InpaintDataset.read_bbox_ch(filename)

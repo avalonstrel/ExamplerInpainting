@@ -42,22 +42,14 @@ from scipy.misc import imread
 from scipy import linalg
 from torch.autograd import Variable
 from torch.nn.functional import adaptive_avg_pool2d
-
-from inception import InceptionV3
-
-
-parser = ArgumentParser(formatter_class=ArgumentDefaultsHelpFormatter)
-parser.add_argument('path', type=str, nargs=2,
-                    help=('Path to the generated images or '
-                          'to .npz statistic files'))
-parser.add_argument('--batch-size', type=int, default=64,
-                    help='Batch size to use')
-parser.add_argument('--dims', type=int, default=2048,
-                    choices=list(InceptionV3.BLOCK_INDEX_BY_DIM),
-                    help=('Dimensionality of Inception features to use. '
-                          'By default, uses pool3 features'))
-parser.add_argument('-c', '--gpu', default='', type=str,
-                    help='GPU to use (leave blank for CPU only)')
+from PIL import Image
+from torch.nn import functional as F
+from .inception import InceptionV3
+from .inception_ import inception_v3
+from torchvision import transforms
+#from torchvision.models.inception import inception_v3
+#
+_transforms_fun=transforms.Compose([transforms.Resize((299,299)), transforms.ToTensor(), transforms.Normalize(mean=[0.485, 0.456, 0.406],std=[0.229, 0.224, 0.225])])
 
 
 def get_activations(images, model, batch_size=64, dims=2048,
@@ -81,7 +73,13 @@ def get_activations(images, model, batch_size=64, dims=2048,
        query tensor.
     """
     model.eval()
-
+    if cuda:
+        dtype = torch.cuda.FloatTensor
+    else:
+        if torch.cuda.is_available():
+            print("WARNING: You have a CUDA device, so you should probably set cuda=True")
+        dtype = torch.FloatTensor
+    #print(dtype)
     d0 = images.shape[0]
     if batch_size > d0:
         print(('Warning: batch size is bigger than the data size. '
@@ -99,19 +97,22 @@ def get_activations(images, model, batch_size=64, dims=2048,
         start = i * batch_size
         end = start + batch_size
 
-        batch = torch.from_numpy(images[start:end]).type(torch.FloatTensor)
-        batch = Variable(batch, volatile=True)
-        if cuda:
-            batch = batch.cuda()
-
-        pred = model(batch)[0]
+        batch = images[start:end].type(dtype)#torch.from_numpy(images[start:end]).type(torch.FloatTensor)
+        batch = Variable(batch)
+        # if cuda:
+        #     batch = batch.cuda()
+        #print(batch.size(), batch)
+        with torch.no_grad():
+            pred = model(batch)[0]
+        #print(pred.size())
 
         # If model output is not scalar, apply global spatial average pooling.
         # This happens if you choose a dimensionality not equal 2048.
         if pred.shape[2] != 1 or pred.shape[3] != 1:
             pred = adaptive_avg_pool2d(pred, output_size=(1, 1))
-
+        #print(pred.size())
         pred_arr[start:end] = pred.cpu().data.numpy().reshape(batch_size, -1)
+        #print(pred.size())
 
     if verbose:
         print(' done')
@@ -197,8 +198,15 @@ def calculate_activation_statistics(images, model, batch_size=64,
                the inception model.
     """
     act = get_activations(images, model, batch_size, dims, cuda, verbose)
+    print("get_activations done")
+    print(act.shape, act)
+
     mu = np.mean(act, axis=0)
-    sigma = np.cov(act, rowvar=False)
+    print(mu.shape, [i for i in mu if i == 0])
+
+    sigma = np.cov(act, rowvar=0, ddof=1)
+    print(sigma.shape)
+    print("cal activation stat done")
     return mu, sigma
 
 
@@ -211,13 +219,14 @@ def _compute_statistics_of_path(path, model, batch_size, dims, cuda):
         path = pathlib.Path(path)
         files = list(path.glob('*.jpg')) + list(path.glob('*.png'))
 
-        imgs = np.array([imread(str(fn)).astype(np.float32) for fn in files])
+        imgs = [_transforms_fun(Image.open(fn).convert("RGB")) for fn in files]
 
+        imgs = torch.stack(imgs)
         # Bring images to shape (B, 3, H, W)
-        imgs = imgs.transpose((0, 3, 1, 2))
+        #imgs = imgs.transpose((0, 3, 1, 2))
 
         # Rescale images to be between 0 and 1
-        imgs /= 255
+        #imgs /= 255
 
         m, s = calculate_activation_statistics(imgs, model, batch_size,
                                                dims, cuda)
@@ -233,25 +242,21 @@ def calculate_fid_given_paths(paths, batch_size, cuda, dims):
 
     block_idx = InceptionV3.BLOCK_INDEX_BY_DIM[dims]
 
-    model = InceptionV3([block_idx])
     if cuda:
-        model.cuda()
+        dtype = torch.cuda.FloatTensor
+    else:
+        if torch.cuda.is_available():
+            print("WARNING: You have a CUDA device, so you should probably set cuda=True")
+        dtype = torch.FloatTensor
 
-    m1, s1 = _compute_statistics_of_path(paths[0], model, batch_size,
+    inception_model = InceptionV3([block_idx]).type(dtype)
+
+    m1, s1 = _compute_statistics_of_path(paths[0], inception_model, batch_size,
                                          dims, cuda)
-    m2, s2 = _compute_statistics_of_path(paths[1], model, batch_size,
+    print("1 done")
+    m2, s2 = _compute_statistics_of_path(paths[1], inception_model, batch_size,
                                          dims, cuda)
+    print("2 done")
     fid_value = calculate_frechet_distance(m1, s1, m2, s2)
 
     return fid_value
-
-
-if __name__ == '__main__':
-    args = parser.parse_args()
-    os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu
-
-    fid_value = calculate_fid_given_paths(args.path,
-                                          args.batch_size,
-                                          args.gpu != '',
-                                          args.dims)
-    print('FID: ', fid_value)

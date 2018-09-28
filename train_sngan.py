@@ -8,14 +8,19 @@ from util.config import Config
 from data.inpaint_dataset import InpaintDataset
 from util.evaluation import AverageMeter
 
+from PIL import Image
+import numpy as np
 import logging
 import time
 import sys
+import os
 
 # python train inpaint.yml
 config = Config(sys.argv[1])
 logger = logging.getLogger(__name__)
-log_dir = 'model_logs/{}_{}'.format(time.strftime('%Y%m%d%H%M', time.localtime(time.time())), config.LOG_DIR)
+time_stamp = time.strftime('%Y%m%d%H%M', time.localtime(time.time()))
+log_dir = 'model_logs/{}_{}'.format(time_stamp, config.LOG_DIR)
+result_dir = 'result_logs/{}_{}'.format(time_stamp, config.LOG_DIR)
 tensorboardlogger = TensorBoardLogger(log_dir)
 cuda0 = torch.device('cuda:{}'.format(config.GPU_ID))
 cpu0 = torch.device('cpu')
@@ -26,14 +31,14 @@ def logger_init():
     """
     logging.basicConfig(level=logging.INFO)
 
-    logfile = 'logs/{}_{}.log'.format(time.strftime('%Y%m%d%H%M', time.localtime(time.time())), config.LOG_DIR)
+    logfile = 'logs/{}_{}.log'.format(time_stamp, config.LOG_DIR)
     fh = logging.FileHandler(logfile, mode='w')
     formatter = logging.Formatter("%(asctime)s - %(filename)s[line:%(lineno)d] - %(levelname)s: %(message)s")
     fh.setFormatter(formatter)
     logger.addHandler(fh)
 
 
-def validate(netG, netD, GANLoss, ReconLoss, DLoss, optG, optD, dataloader, epoch, device=cuda0, val_num=30):
+def validate(netG, netD, GANLoss, ReconLoss, DLoss, optG, optD, dataloader, epoch, device=cuda0, batch_n="whole"):
     """
     validate phase
     """
@@ -48,9 +53,15 @@ def validate(netG, netD, GANLoss, ReconLoss, DLoss, optG, optD, dataloader, epoc
     netG.train()
     netD.train()
     end = time.time()
+    val_save_dir = os.path.join(result_dir, "val_{}_{}".format(epoch, batch_n))
+    val_save_real_dir = os.path.join(val_save_dir, "real")
+    val_save_gen_dir = os.path.join(val_save_dir, "gen")
+    if not os.path.exists(val_save_real_dir):
+        os.makedirs(val_save_real_dir)
+        os.makedirs(val_save_gen_dir)
+    info = {}
     for i, (imgs, masks) in enumerate(dataloader):
-        if i > val_num:
-            break
+
         data_time.update(time.time() - end)
         masks = masks['random_free_form']
         #masks = (masks > 0).type(torch.FloatTensor)
@@ -89,28 +100,40 @@ def validate(netG, netD, GANLoss, ReconLoss, DLoss, optG, optD, dataloader, epoc
 
 
         # Logger logging
-        logger.info("Validation Epoch {0}, [{1}/{2}]: Batch Time:{batch_time.val:.4f},\t Data Time:{data_time.val:.4f},\t Whole Gen Loss:{whole_loss.val:.4f}\t,"
-                    "Recon Loss:{r_loss.val:.4f},\t GAN Loss:{g_loss.val:.4f},\t D Loss:{d_loss.val:.4f}"
-                    .format(epoch, i, len(dataloader), batch_time=batch_time, data_time=data_time, whole_loss=losses['whole_loss'], r_loss=losses['r_loss'] \
-                    ,g_loss=losses['g_loss'], d_loss=losses['d_loss']))
 
-        if i*config.BATCH_SIZE < config.STATIC_VIEW_SIZE:
+
+        if (i+1) < config.STATIC_VIEW_SIZE:
+
             def img2photo(imgs):
                 return ((imgs+1)*127.5).transpose(1,2).transpose(2,3).detach().cpu().numpy()
             # info = { 'val/ori_imgs':img2photo(imgs),
             #          'val/coarse_imgs':img2photo(coarse_imgs),
             #          'val/recon_imgs':img2photo(recon_imgs),
             #          'val/comp_imgs':img2photo(complete_imgs),
-            info = {
-                     'val/whole_imgs':img2photo(torch.cat([imgs, imgs * (1 - masks), coarse_imgs, recon_imgs, complete_imgs], dim=3))
-                     }
+            info['val/whole_imgs/{}'.format(i)] = img2photo(torch.cat([imgs, imgs * (1 - masks), coarse_imgs, recon_imgs, complete_imgs], dim=3))
 
+        else:
+            logger.info("Validation Epoch {0}, [{1}/{2}]: Batch Time:{batch_time.val:.4f},\t Data Time:{data_time.val:.4f},\t Whole Gen Loss:{whole_loss.val:.4f}\t,"
+                        "Recon Loss:{r_loss.val:.4f},\t GAN Loss:{g_loss.val:.4f},\t D Loss:{d_loss.val:.4f}"
+                        .format(epoch, i+1, len(dataloader), batch_time=batch_time, data_time=data_time, whole_loss=losses['whole_loss'], r_loss=losses['r_loss'] \
+                        ,g_loss=losses['g_loss'], d_loss=losses['d_loss']))
+            j = 0
             for tag, images in info.items():
-                tensorboardlogger.image_summary(tag, images, i)
+                h, w = images.shape[1], images.shape[2] // 5
+                for val_img in images:
+                    real_img = val_img[:,:w,:]
+                    gen_img = val_img[:,(4*w):,:]
+                    real_img = Image.fromarray(real_img.astype(np.uint8))
+                    gen_img = Image.fromarray(gen_img.astype(np.uint8))
+                    real_img.save(os.path.join(val_save_real_dir, "{}.png".format(j)))
+                    gen_img.save(os.path.join(val_save_gen_dir, "{}.png".format(j)))
+                    j += 1
+                tensorboardlogger.image_summary(tag, images, epoch)
+            break
         end = time.time()
 
 
-def train(netG, netD, GANLoss, ReconLoss, DLoss, optG, optD, dataloader, epoch, device=cuda0):
+def train(netG, netD, GANLoss, ReconLoss, DLoss, optG, optD, dataloader, epoch, device=cuda0, val_datas=None):
     """
     Train Phase, for training and spectral normalization patch gan in
     Free-Form Image Inpainting with Gated Convolution (snpgan)
@@ -173,12 +196,11 @@ def train(netG, netD, GANLoss, ReconLoss, DLoss, optG, optD, dataloader, epoch, 
         # Update time recorder
         batch_time.update(time.time() - end)
 
-
-        if i % config.SUMMARY_FREQ == 0:
+        if (i+1) % config.SUMMARY_FREQ == 0:
             # Logger logging
             logger.info("Epoch {0}, [{1}/{2}]: Batch Time:{batch_time.val:.4f},\t Data Time:{data_time.val:.4f}, Whole Gen Loss:{whole_loss.val:.4f}\t,"
                         "Recon Loss:{r_loss.val:.4f},\t GAN Loss:{g_loss.val:.4f},\t D Loss:{d_loss.val:.4f}" \
-                        .format(epoch, i, len(dataloader), batch_time=batch_time, data_time=data_time, whole_loss=losses['whole_loss'], r_loss=losses['r_loss'] \
+                        .format(epoch, i+1, len(dataloader), batch_time=batch_time, data_time=data_time, whole_loss=losses['whole_loss'], r_loss=losses['r_loss'] \
                         ,g_loss=losses['g_loss'], d_loss=losses['d_loss']))
             # Tensorboard logger for scaler and images
             info_terms = {'WGLoss':whole_loss.item(), 'ReconLoss':r_loss.item(), "GANLoss":g_loss.item(), "DLoss":d_loss.item()}
@@ -200,7 +222,12 @@ def train(netG, netD, GANLoss, ReconLoss, DLoss, optG, optD, dataloader, epoch, 
                      }
 
             for tag, images in info.items():
-                tensorboardlogger.image_summary(tag, images, i)
+                tensorboardlogger.image_summary(tag, images, epoch*len(dataloader)+i)
+        if (i+1) % config.VAL_SUMMARY_FREQ == 0 and val_datas != None:
+
+            validate(netG, netD, GANLoss, ReconLoss, DLoss, optG, optD, val_datas , epoch, device, batch_n=i)
+            netG.train()
+            netD.train()
         end = time.time()
 
 def main():
@@ -223,6 +250,22 @@ def main():
                                     resize_shape=tuple(config.IMG_SHAPES), random_bbox_shape=config.RANDOM_BBOX_SHAPE, \
                                     random_bbox_margin=config.RANDOM_BBOX_MARGIN,
                                     random_ff_setting=config.RANDOM_FF_SETTING)
+    val_loader = val_dataset.loader(batch_size=1, shuffle=False,
+                                        num_workers=1)
+    #print(len(val_loader))
+
+    ### Generate a new val data
+    val_datas = []
+    j = 0
+    for i, (imgs, masks) in enumerate(val_loader):
+        if j < config.STATIC_VIEW_SIZE:
+            if imgs.size(1) == 3:
+                val_datas.append((imgs, masks))
+                j += 1
+        else:
+            break
+    #val_datas = [(imgs, masks) for imgs, masks in val_loader]
+
     val_loader = val_dataset.loader(batch_size=1, shuffle=False,
                                         num_workers=1)
     logger.info("Finish the dataset initialization.")
@@ -258,10 +301,10 @@ def main():
         #validate(netG, netD, gan_loss, recon_loss, dis_loss, optG, optD, val_loader, i, device=cuda0)
 
         #train data
-        train(netG, netD, gan_loss, recon_loss, dis_loss, optG, optD, train_loader, i, device=cuda0)
+        train(netG, netD, gan_loss, recon_loss, dis_loss, optG, optD, train_loader, i, device=cuda0, val_datas=val_datas)
 
         # validate
-        validate(netG, netD, gan_loss, recon_loss, dis_loss, optG, optD, val_loader, i, device=cuda0)
+        validate(netG, netD, gan_loss, recon_loss, dis_loss, optG, optD, val_datas, i, device=cuda0)
 
         saved_model = {
             'epoch': i + 1,

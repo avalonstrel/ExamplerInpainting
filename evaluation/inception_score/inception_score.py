@@ -17,6 +17,7 @@ def inception_score(imgs, cuda=True, batch_size=32, resize=False, splits=1):
     batch_size -- batch size for feeding into Inception v3
     splits -- number of splits
     """
+
     N = len(imgs)
 
     assert batch_size > 0
@@ -36,12 +37,12 @@ def inception_score(imgs, cuda=True, batch_size=32, resize=False, splits=1):
     # Load inception model
     inception_model = inception_v3(pretrained=True, transform_input=False).type(dtype)
     inception_model.eval();
-    up = nn.Upsample(size=(299, 299), mode='bilinear').type(dtype)
+    #up = nn.Upsample(size=(299, 299), mode='bilinear').type(dtype)
     def get_pred(x):
         if resize:
-            x = up(x)
+            x = F.interpolate(x, size=(299, 299), mode='bilinear')
         x = inception_model(x)
-        return F.softmax(x).data.cpu().numpy()
+        return F.softmax(x, dim=1).data.cpu().numpy()
 
     # Get predictions
     preds = np.zeros((N, 1000))
@@ -89,7 +90,7 @@ if __name__ == '__main__':
                              ])
     )
 
-    IgnoreLabelDataset(cifar)
+    #IgnoreLabelDataset(cifar)
 
     print ("Calculating Inception Score...")
     print (inception_score(IgnoreLabelDataset(cifar), cuda=True, batch_size=32, resize=True, splits=10))

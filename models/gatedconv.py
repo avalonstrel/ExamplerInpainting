@@ -70,10 +70,11 @@ class InpaintGCNet(torch.nn.Module):
     def forward(self, imgs, masks, img_exs=None):
         # Coarse
         masked_imgs =  imgs * (1 - masks) + masks
-        if img_exs is None:
+        if img_exs == None:
             input_imgs = torch.cat([masked_imgs, masks, torch.full_like(masks, 1.)], dim=1)
         else:
             input_imgs = torch.cat([masked_imgs, img_exs, masks, torch.full_like(masks, 1.)], dim=1)
+        #print(input_imgs.size(), imgs.size(), masks.size())
         x = self.coarse_net(input_imgs)
         x = torch.clamp(x, -1., 1.)
         coarse_x = x
