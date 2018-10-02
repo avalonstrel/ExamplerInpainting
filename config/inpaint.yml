@@ -70,6 +70,10 @@ DATA_FLIST:
     '/unsullied/sharefs/linhangyu/Inpainting/Data/VOCData/voc_horse_bbox_train_flist.txt',
     '/unsullied/sharefs/linhangyu/Inpainting/Data/VOCData/voc_horse_bbox_val_flist.txt'
   ]
+  coco: [
+    '/home/lhy/datasets/coco2017/whole_train_inpaint_flist.txt',
+    '/home/lhy/datasets/coco2017/whole_val_inpaint_flist.txt'
+  ]
 
 STATIC_VIEW_SIZE: 30
 IMG_SHAPES: [256, 256, 3]
