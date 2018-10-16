@@ -1,0 +1,1 @@
+python3 train_mask_gan.py config/inpaint_places2_maskgan.yml

@@ -1,7 +1,8 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from models.gatedconv import InpaintGCNet, InpaintDirciminator
+#from models.gatedconv import InpaintGCNet, InpaintDirciminator
+from models.sa_gan import InpaintSANet, InpaintSADirciminator
 from models.loss import SNDisLoss, SNGenLoss, ReconLoss
 from util.logger import TensorBoardLogger
 from util.config import Config
@@ -54,7 +55,7 @@ def validate(netG, netD, GANLoss, ReconLoss, DLoss, optG, optD, dataloader, epoc
     netG.train()
     netD.train()
     end = time.time()
-    val_save_dir = os.path.join(result_dir, "val_{}_{}".format(epoch, batch_n if isinstance(batch_n, str) else batch_n+1 ))
+    val_save_dir = os.path.join(result_dir, "val_{}_{}".format(epoch, batch_n if isinstance(batch_n, str) else batch_n+1))
     val_save_real_dir = os.path.join(val_save_dir, "real")
     val_save_gen_dir = os.path.join(val_save_dir, "gen")
     val_save_inf_dir = os.path.join(val_save_dir, "inf")
@@ -281,8 +282,8 @@ def main():
 
     # Define the Network Structure
     logger.info("Define the Network Structure and Losses")
-    netG = InpaintGCNet()
-    netD = InpaintDirciminator()
+    netG = InpaintSANet()
+    netD = InpaintSADirciminator()
 
     if config.MODEL_RESTORE != '':
         whole_model_path = 'model_logs/{}'.format( config.MODEL_RESTORE)

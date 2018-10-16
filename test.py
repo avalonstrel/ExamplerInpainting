@@ -6,8 +6,7 @@ import os
 
 parser = ArgumentParser(formatter_class=ArgumentDefaultsHelpFormatter)
 parser.add_argument('path', type=str, nargs=2,
-                    help=('Path to the generated images or '
-                          'to .npz statistic files'))
+                    help=('Path to the generated images'))
 
 args = parser.parse_args()
 path1, path2 = args.path
@@ -20,4 +19,4 @@ ssim_score = None
 fid_score = metrics['fid']([path1, path2])
 ssim_score = metrics['ssim']([path1, path2])
 
-print("IS Mean:{}, IS STD:{}, FID:{}, SSIM:{}".format(inception_score, std_is, fid_score, ssim_score))
+print("IS Mean:{}, IS STD:{}, FID:{}, SSIM:{}".format(inception_score2, std_is, fid_score, ssim_score))

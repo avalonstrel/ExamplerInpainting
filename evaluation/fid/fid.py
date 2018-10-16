@@ -198,15 +198,15 @@ def calculate_activation_statistics(images, model, batch_size=64,
                the inception model.
     """
     act = get_activations(images, model, batch_size, dims, cuda, verbose)
-    print("get_activations done")
-    print(act.shape, act)
+    #print("get_activations done")
+    #print(act.shape, act)
 
     mu = np.mean(act, axis=0)
-    print(mu.shape, [i for i in mu if i == 0])
+    #print(mu.shape, [i for i in mu if i == 0])
 
     sigma = np.cov(act, rowvar=0, ddof=1)
-    print(sigma.shape)
-    print("cal activation stat done")
+    #print(sigma.shape)
+    #print("cal activation stat done")
     return mu, sigma
 
 

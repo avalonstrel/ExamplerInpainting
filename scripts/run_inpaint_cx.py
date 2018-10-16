@@ -1,0 +1,1 @@
+python3 train_contextual_loss.py config/inpaint_places2_cx.yml
