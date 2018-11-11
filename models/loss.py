@@ -2,7 +2,7 @@ import torch
 import numpy as np
 import torch.nn.functional as F
 from .cx_loss import CX_loss, symetric_CX_loss
-
+from .vgg import vgg16_bn
 
 class CXReconLoss(torch.nn.Module):
 
@@ -19,14 +19,22 @@ class CXReconLoss(torch.nn.Module):
         #self.feat_extractor = self.feat_extractor.cuda()
         self.weight = weight
 
-    def forward(self, imgs, recon_imgs):
+    def forward(self, imgs, recon_imgs, coarse_imgs=None):
         if self.device is not None:
             imgs = imgs.to(self.device)
             recon_imgs = recon_imgs.to(self.device)
+            if coarse_imgs is not None:
+                coarse_imgs = coarse_imgs.to(self.device)
+
         imgs = F.interpolate(imgs, (224,224))
         recon_imgs = F.interpolate(recon_imgs, (224,224))
+
         ori_feats, _ = self.feat_extractor(imgs)
         recon_feats, _ = self.feat_extractor(recon_imgs)
+        if coarse_imgs is not None:
+            coarse_imgs = F.interpolate(coarse_imgs, (224,224))
+            coarse_feats, _ =self.feat_extractor(coarse_imgs)
+            return self.weight * (symetric_CX_loss(ori_feats, recon_feats) )
         return self.weight * symetric_CX_loss(ori_feats, recon_feats)
 
 
@@ -81,17 +89,50 @@ class L1ReconLoss(torch.nn.Module):
         else:
             #print(masks.view(masks.size(0), -1).mean(1).size(), imgs.size())
             return self.weight * torch.mean(torch.abs(imgs - recon_imgs) / masks.view(masks.size(0), -1).mean(1).view(-1,1,1,1))
-
+#CX
+#[0,9,13,17]
 class PerceptualLoss(torch.nn.Module):
     """
     Use vgg or inception for perceptual loss, compute the feature distance, (todo)
     """
-    def __init__(self, weight=1):
+    def __init__(self, weight=1, layers=[0,9,13,17], feat_extractors=None):
         super(PerceptualLoss, self).__init__()
         self.weight = weight
+        self.feat_extractors = feat_extractors
+        self.layers = layers
 
-    def forward(self, img, recon_imgs):
-        pass
+    def forward(self, imgs, recon_imgs):
+        imgs = F.interpolate(imgs, (224,224))
+        recon_imgs = F.interpolate(recon_imgs, (224,224))
+        feats = self.feat_extractors(imgs, self.layers)
+        recon_feats = self.feat_extractors(recon_imgs, self.layers)
+        loss = 0
+        for feat, recon_feat in zip(feats, recon_feats):
+            loss = loss + torch.mean(torch.abs(feat - recon_feat))
+        return self.weight*loss
+
+class StyleLoss(torch.nn.Module):
+    """
+    Use vgg or inception for style loss, compute the feature distance, (todo)
+    """
+    def __init__(self, weight=1, layers=[0,9,13,17], feat_extractors=None):
+        super(StyleLoss, self).__init__()
+        self.weight = weight
+        self.feat_extractors = feat_extractors
+        self.layers = layers
+    def gram(self, x):
+        gram_x = x.view(x.size(0), x.size(1), x.size(2)*x.size(3))
+        return torch.bmm(gram_x, torch.transpose(gram_x, 1, 2))
+
+    def forward(self, imgs, recon_imgs):
+        imgs = F.interpolate(imgs, (224,224))
+        recon_imgs = F.interpolate(recon_imgs, (224,224))
+        feats = self.feat_extractors(imgs, self.layers)
+        recon_feats = self.feat_extractors(recon_imgs, self.layers)
+        loss = 0
+        for feat, recon_feat in zip(feats, recon_feats):
+            loss = loss + torch.mean(torch.abs(self.gram(feat) - self.gram(recon_feat))) / (feat.size(2) * feat.size(3) )
+        return self.weight*loss
 
 class ReconLoss(torch.nn.Module):
     """

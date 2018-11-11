@@ -223,12 +223,11 @@ class InpaintDataset(BaseDataset):
 
         Returns:
             tuple: (top, left, height, width)
-
         """
 
         h,w = config['img_shape']
         mask = np.zeros((h,w))
-        num_v = 8+np.random.randint(config['mv'])#tf.random_uniform([], minval=0, maxval=config.MAXVERTEX, dtype=tf.int32)
+        num_v = 10+np.random.randint(config['mv'])#tf.random_uniform([], minval=0, maxval=config.MAXVERTEX, dtype=tf.int32)
 
         for i in range(num_v):
             start_x = np.random.randint(w)

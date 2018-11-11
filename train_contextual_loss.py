@@ -48,7 +48,7 @@ def validate(nets, loss_terms, opts, dataloader, epoch, device=(cuda0, cuda1), b
     validate phase
     """
     netG, netD, netVGG = nets["netG"], nets["netD"], nets["vgg"]
-    GANLoss, ReconLoss, L1ReconLoss, DLoss  = loss_terms["GANLoss"], loss_terms["ReconLoss"], loss_terms["L1ReconLoss"], loss_terms["DLoss"]
+    GANLoss, ReconLoss, CXReconLoss, L1ReconLoss, DLoss  = loss_terms["GANLoss"], loss_terms["ReconLoss"], loss_terms["CXReconLoss"], loss_terms["L1ReconLoss"], loss_terms["DLoss"]
     optG, optD = opts["optG"], opts["optD"]
     device0, device1 = device
     netG.to(device0)
@@ -57,7 +57,7 @@ def validate(nets, loss_terms, opts, dataloader, epoch, device=(cuda0, cuda1), b
     netD.eval()
     batch_time = AverageMeter()
     data_time = AverageMeter()
-    losses = {"g_loss":AverageMeter(), "r_loss":AverageMeter(),"l1_r_loss":AverageMeter(), "whole_loss":AverageMeter(), "d_loss":AverageMeter()}
+    losses = {"g_loss":AverageMeter(), "r_loss":AverageMeter(),"cx_r_loss":AverageMeter(), "whole_loss":AverageMeter(), "d_loss":AverageMeter()}
 
     netG.train()
     netD.train()
@@ -77,7 +77,7 @@ def validate(nets, loss_terms, opts, dataloader, epoch, device=(cuda0, cuda1), b
         masks = masks['val']
         #masks = (masks > 0).type(torch.FloatTensor)
 
-        imgs, masks = imgs.to(device), masks.to(device)
+        imgs, masks = imgs.to(device0), masks.to(device0)
         imgs = (imgs / 127.5 - 1)
         # mask is 1 on masked region
         # forward
@@ -95,17 +95,16 @@ def validate(nets, loss_terms, opts, dataloader, epoch, device=(cuda0, cuda1), b
 
         g_loss = GANLoss(pred_neg)
 
-        r_loss = ReconLoss(imgs, recon_imgs)
-        l1_r_loss = L1ReconLoss(imgs, recon_imgs)
-        r_loss = r_loss.to(device0)
-        #r_loss = ReconLoss(imgs, coarse_imgs, recon_imgs, masks)
 
-        whole_loss = g_loss + r_loss
+        r_loss = ReconLoss(imgs, coarse_imgs, recon_imgs, masks)
+        cx_r_loss = CXReconLoss(imgs, recon_imgs)
+        cx_r_loss = cx_r_loss.to(device0)
+        whole_loss = g_loss + r_loss + cx_r_loss
 
         # Update the recorder for losses
         losses['g_loss'].update(g_loss.item(), imgs.size(0))
         losses['r_loss'].update(r_loss.item(), imgs.size(0))
-        losses['l1_r_loss'].update(l1_r_loss.item(), imgs.size(0))
+        losses['cx_r_loss'].update(cx_r_loss.item(), imgs.size(0))
         losses['whole_loss'].update(whole_loss.item(), imgs.size(0))
 
         d_loss = DLoss(pred_pos, pred_neg)
@@ -129,8 +128,8 @@ def validate(nets, loss_terms, opts, dataloader, epoch, device=(cuda0, cuda1), b
 
         else:
             logger.info("Validation Epoch {0}, [{1}/{2}]: Batch Time:{batch_time.val:.4f},\t Data Time:{data_time.val:.4f},\t Whole Gen Loss:{whole_loss.val:.4f}\t,"
-                        "Recon Loss:{r_loss.val:.4f},\tL1 Recon Loss:{l1_r_loss.val:.4f},\t GAN Loss:{g_loss.val:.4f},\t D Loss:{d_loss.val:.4f}"
-                        .format(epoch, i+1, len(dataloader), batch_time=batch_time, data_time=data_time, whole_loss=losses['whole_loss'], r_loss=losses['r_loss'],l1_r_loss=losses['l1_r_loss'] \
+                        "Recon Loss:{r_loss.val:.4f},\tCX Recon Loss:{cx_r_loss.val:.4f},\t GAN Loss:{g_loss.val:.4f},\t D Loss:{d_loss.val:.4f}"
+                        .format(epoch, i+1, len(dataloader), batch_time=batch_time, data_time=data_time, whole_loss=losses['whole_loss'], r_loss=losses['r_loss'],cx_r_loss=losses['cx_r_loss'] \
                         ,g_loss=losses['g_loss'], d_loss=losses['d_loss']))
             j = 0
             for tag, images in info.items():
@@ -161,14 +160,14 @@ def train(nets, loss_terms, opts, dataloader, epoch, device=(cuda0, cuda1), val_
 
     """
     netG, netD, netVGG = nets["netG"], nets["netD"], nets["vgg"]
-    GANLoss, ReconLoss, L1ReconLoss, DLoss  = loss_terms["GANLoss"], loss_terms["ReconLoss"], loss_terms["L1ReconLoss"],  loss_terms["DLoss"]
+    GANLoss, ReconLoss, CXReconLoss, L1ReconLoss, DLoss  = loss_terms["GANLoss"], loss_terms["ReconLoss"], loss_terms["CXReconLoss"], loss_terms["L1ReconLoss"],  loss_terms["DLoss"]
     optG, optD = opts["optG"], opts["optD"]
     device0, device1 = device
     netG.to(device0)
     netD.to(device0)
     batch_time = AverageMeter()
     data_time = AverageMeter()
-    losses = {"g_loss":AverageMeter(), "r_loss":AverageMeter(),"l1_r_loss":AverageMeter(), "whole_loss":AverageMeter(), 'd_loss':AverageMeter()}
+    losses = {"g_loss":AverageMeter(), "r_loss":AverageMeter(),"cx_r_loss":AverageMeter(), "whole_loss":AverageMeter(), 'd_loss':AverageMeter()}
 
     netG.train()
     netD.train()
@@ -205,17 +204,18 @@ def train(nets, loss_terms, opts, dataloader, epoch, device=(cuda0, cuda1), val_
         pred_neg = netD(neg_imgs)
         #pred_pos, pred_neg = torch.chunk(pred_pos_neg,  2, dim=0)
         g_loss = GANLoss(pred_neg)
-        #r_loss = ReconLoss(imgs, coarse_imgs, recon_imgs, masks)
-        r_loss = ReconLoss(imgs, recon_imgs)
-        l1_r_loss = L1ReconLoss(imgs, recon_imgs)
-        r_loss = r_loss.to(device0)
+        r_loss = ReconLoss(imgs, coarse_imgs, recon_imgs, masks)
+        cx_r_loss = CXReconLoss(imgs, recon_imgs, coarse_imgs)
+        #l1_r_loss = L1ReconLoss(imgs, recon_imgs)
+        cx_r_loss = cx_r_loss.to(device0)
         #print(r_loss)
-        whole_loss = g_loss + r_loss
+        whole_loss = g_loss + r_loss + cx_r_loss
 
         # Update the recorder for losses
         losses['g_loss'].update(g_loss.item(), imgs.size(0))
         losses['r_loss'].update(r_loss.item(), imgs.size(0))
-        losses['l1_r_loss'].update(l1_r_loss.item(), imgs.size(0))
+        losses['cx_r_loss'].update(cx_r_loss.item(), imgs.size(0))
+        #losses['l1_r_loss'].update(l1_r_loss.item(), imgs.size(0))
         losses['whole_loss'].update(whole_loss.item(), imgs.size(0))
         whole_loss.backward()
 
@@ -228,11 +228,11 @@ def train(nets, loss_terms, opts, dataloader, epoch, device=(cuda0, cuda1), val_
         if (i+1) % config.SUMMARY_FREQ == 0:
             # Logger logging
             logger.info("Epoch {0}, [{1}/{2}]: Batch Time:{batch_time.val:.4f},\t Data Time:{data_time.val:.4f}, Whole Gen Loss:{whole_loss.val:.4f}\t,"
-                        "Recon Loss:{r_loss.val:.4f},\t L1 Recon Loss:{l1_r_loss.val:.4f},\t GAN Loss:{g_loss.val:.4f},\t D Loss:{d_loss.val:.4f}" \
+                        "Recon Loss:{r_loss.val:.4f},\t CX Recon Loss:{cx_r_loss.val:.4f},\t GAN Loss:{g_loss.val:.4f},\t D Loss:{d_loss.val:.4f}" \
                         .format(epoch, i+1, len(dataloader), batch_time=batch_time, data_time=data_time, whole_loss=losses['whole_loss'], r_loss=losses['r_loss'] \
-                        ,l1_r_loss=losses['l1_r_loss'],g_loss=losses['g_loss'], d_loss=losses['d_loss']))
+                        ,cx_r_loss=losses['cx_r_loss'],g_loss=losses['g_loss'], d_loss=losses['d_loss']))
             # Tensorboard logger for scaler and images
-            info_terms = {'WGLoss':whole_loss.item(), 'ReconLoss':r_loss.item(), 'L1ReconLoss':l1_r_loss.item(), "GANLoss":g_loss.item(), "DLoss":d_loss.item()}
+            info_terms = {'WGLoss':whole_loss.item(), 'ReconLoss':r_loss.item(), 'CXReconLoss':cx_r_loss.item(), "GANLoss":g_loss.item(), "DLoss":d_loss.item()}
 
             for tag, value in info_terms.items():
                 tensorboardlogger.scalar_summary(tag, value, epoch*len(dataloader)+i)
@@ -315,7 +315,8 @@ def main():
         logger.info("Loading pretrained models from {} ...".format(config.MODEL_RESTORE))
 
     # Define loss
-    recon_loss = CXReconLoss(netVGG, device=cuda1)
+    recon_loss = ReconLoss(*(config.L1_LOSS_ALPHA))
+    cxrecon_loss = CXReconLoss(netVGG, device=cuda1)
     l1_recon_loss = L1ReconLoss(config.L1_RECONLOSS_ALPHA)
     gan_loss = SNGenLoss(config.GAN_LOSS_ALPHA)
     dis_loss = SNDisLoss()
@@ -334,6 +335,7 @@ def main():
     losses = {
         "GANLoss":gan_loss,
         "ReconLoss":recon_loss,
+        "CXReconLoss":cxrecon_loss,
         "L1ReconLoss":l1_recon_loss,
         "DLoss":dis_loss,
 

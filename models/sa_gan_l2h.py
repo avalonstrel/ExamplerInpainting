@@ -107,7 +107,7 @@ class InpaintSANet(torch.nn.Module):
     """
     Inpaint generator, input should be 5*256*256, where 3*256*256 is the masked image, 1*256*256 for mask, 1*256*256 is the guidence
     """
-    def __init__(self, n_in_channel=5):
+    def __init__(self, n_in_channel=7):
         super(InpaintSANet, self).__init__()
         cnum = 32
         self.coarse_net = nn.Sequential(
@@ -172,26 +172,24 @@ class InpaintSANet(torch.nn.Module):
         )
 
 
-    def forward(self, imgs, masks, img_exs=None):
+    def forward(self, imgs, masks, pre_imgs):
         # Coarse
+
         masked_imgs =  imgs * (1 - masks) + masks
-        if img_exs == None:
-            input_imgs = torch.cat([masked_imgs, masks, torch.full_like(masks, 1.)], dim=1)
-        else:
-            input_imgs = torch.cat([masked_imgs, img_exs, masks, torch.full_like(masks, 1.)], dim=1)
+        input_imgs = torch.cat([masked_imgs, pre_imgs, masks ], dim=1)
+
         #print(input_imgs.size(), imgs.size(), masks.size())
         x = self.coarse_net(input_imgs)
         x = torch.clamp(x, -1., 1.)
         coarse_x = x
+
         # Refine
         masked_imgs = imgs * (1 - masks) + coarse_x * masks
-        if img_exs is None:
-            input_imgs = torch.cat([masked_imgs, masks, torch.full_like(masks, 1.)], dim=1)
-        else:
-            input_imgs = torch.cat([masked_imgs, img_exs, masks, torch.full_like(masks, 1.)], dim=1)
+        input_imgs = torch.cat([masked_imgs, pre_imgs, masks], dim=1)
+
         x = self.refine_conv_net(input_imgs)
         x, attention = self.refine_attn(x)
-        print(x.size(), attention.size())
+        #print(x.size(), attention.size())
         x = self.refine_upsample_net(x)
         x = torch.clamp(x, -1., 1.)
         return coarse_x, x, attention
@@ -208,7 +206,7 @@ class InpaintSADirciminator(nn.Module):
             SNConvWithActivation(8*cnum, 8*cnum, 4, 2, padding=get_pad(16, 5, 2)),
             SNConvWithActivation(8*cnum, 8*cnum, 4, 2, padding=get_pad(8, 5, 2)),
             Self_Attn(8*cnum, 'relu'),
-            SNConvWithActivation(8*cnum, 8*cnum, 4, 2, padding=get_pad(4, 5, 2)),
+            #SNConvWithActivation(8*cnum, 8*cnum, 4, 2, padding=get_pad(16, 5, 2)),
         )
         self.linear = nn.Linear(8*cnum*2*2, 1)
 

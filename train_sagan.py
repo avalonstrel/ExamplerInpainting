@@ -74,7 +74,7 @@ def validate(netG, netD, GANLoss, ReconLoss, DLoss, optG, optD, dataloader, epoc
         imgs = (imgs / 127.5 - 1)
         # mask is 1 on masked region
         # forward
-        coarse_imgs, recon_imgs = netG(imgs, masks)
+        coarse_imgs, recon_imgs, attention = netG(imgs, masks)
 
         complete_imgs = recon_imgs * masks + imgs * (1 - masks)
 
@@ -168,8 +168,9 @@ def train(netG, netD, GANLoss, ReconLoss, DLoss, optG, optD, dataloader, epoch, 
         imgs, masks = imgs.to(device), masks.to(device)
         imgs = (imgs / 127.5 - 1)
         # mask is 1 on masked region
-        coarse_imgs, recon_imgs = netG(imgs, masks)
 
+        coarse_imgs, recon_imgs, attention = netG(imgs, masks)
+        #print(attention.size(), )
         complete_imgs = recon_imgs * masks + imgs * (1 - masks)
 
         pos_imgs = torch.cat([imgs, masks, torch.full_like(masks, 1.)], dim=1)
@@ -267,10 +268,11 @@ def main():
     ### Generate a new val data
     val_datas = []
     j = 0
-    for i, (imgs, masks) in enumerate(val_loader):
+    for i, data in enumerate(val_loader):
         if j < config.STATIC_VIEW_SIZE:
+            imgs = data[0]
             if imgs.size(1) == 3:
-                val_datas.append((imgs, masks))
+                val_datas.append(data)
                 j += 1
         else:
             break
