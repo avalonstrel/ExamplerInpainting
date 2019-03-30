@@ -1,0 +1,1 @@
+python3 train_encode_decode.py config/inpaint_encoder_decoder.yml

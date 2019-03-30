@@ -1,0 +1,1 @@
+python3 train_unet_sr.py config/inpaint_places2_sa_unet_sr.yml

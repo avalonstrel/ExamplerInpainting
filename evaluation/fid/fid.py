@@ -218,7 +218,7 @@ def _compute_statistics_of_path(path, model, batch_size, dims, cuda):
     else:
         path = pathlib.Path(path)
         files = list(path.glob('*.jpg')) + list(path.glob('*.png'))
-
+        #print(files)
         imgs = [_transforms_fun(Image.open(fn).convert("RGB")) for fn in files]
 
         imgs = torch.stack(imgs)

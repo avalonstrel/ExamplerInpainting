@@ -4,6 +4,24 @@ import torch.nn.functional as F
 from .cx_loss import CX_loss, symetric_CX_loss
 from .vgg import vgg16_bn
 
+class TVLoss(torch.nn.Module):
+    """
+    TV loss
+    """
+
+    def __init__(self, weight=1):
+        self.weight = weight
+
+    def forward(self,):
+        batch_size = x.size()[0]
+        h_x = x.size()[2]
+        w_x = x.size()[3]
+        count_h = self._tensor_size(x[:,:,1:,:])
+        count_w = self._tensor_size(x[:,:,:,1:])
+        h_tv = torch.pow((x[:,:,1:,:]-x[:,:,:h_x-1,:]),2).sum()
+        w_tv = torch.pow((x[:,:,:,1:]-x[:,:,:,:w_x-1]),2).sum()
+        return self.weight*2*(h_tv/count_h+w_tv/count_w)/batch_size
+
 class CXReconLoss(torch.nn.Module):
 
     """

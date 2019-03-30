@@ -1,0 +1,1 @@
+python3 train_sa_l2h_unet.py config/inpaint_coco_sa_l2h_unet_perc.yml

@@ -5,6 +5,7 @@ import numpy as np
 from torch.autograd import Variable
 from .spectral import SpectralNorm
 from .networks import GatedConv2dWithActivation, GatedDeConv2dWithActivation, SNConvWithActivation, get_pad
+
 class Self_Attn(nn.Module):
     """ Self attention Layer"""
     def __init__(self,in_dim,activation,with_attn=False):
@@ -46,14 +47,14 @@ class InpaintRUNNet(torch.nn.Module):
     """
     Inpaint generator, input should be 5*256*256, where 3*256*256 is the masked image, 1*256*256 for mask, 1*256*256 is the guidence
     """
-    def __init__(self, n_in_channel=7):
+    def __init__(self, device, n_in_channel=7, ):
         super(InpaintRUNNet, self).__init__()
         cnum = 32
         self.cnum = cnum
-
+        self.device = device
         self.input_block = nn.Sequential(
-            GatedConv2dWithActivation(n_in_channel, cnum, 7, 1, padding=get_pad(256, 7, 1)),
-            GatedConv2dWithActivation(cnum, cnum, 5, 1, padding=get_pad(256, 5, 1)))
+            GatedConv2dWithActivation(n_in_channel, cnum, 7, 1, dilation=1, padding=get_pad(256, 7, 1, 1)),
+            GatedConv2dWithActivation(cnum, cnum, 5, 1, dilation=1, padding=get_pad(256, 5, 1, 1)))
 
         self.downsample_layer1 = GatedConv2dWithActivation(cnum, cnum, 4, 2, padding=get_pad(256, 4, 2))
         self.eblock1 = nn.Sequential(
@@ -72,12 +73,12 @@ class InpaintRUNNet(torch.nn.Module):
 
         self.downsample_layer4 = GatedConv2dWithActivation(8*cnum, 8*cnum, 4, 2, padding=get_pad(32, 4, 2))
         self.eblock4 = nn.Sequential(
-            GatedConv2dWithActivation(8*cnum, 8*cnum, 3, 1, padding=get_pad(16, 3, 1)),
-            GatedConv2dWithActivation(8*cnum, 8*cnum, 3, 1, padding=get_pad(16, 3, 1)),)
+            GatedConv2dWithActivation(8*cnum, 8*cnum, 3, 1, dilation=2, padding=get_pad(16, 3, 1, 2)),
+            GatedConv2dWithActivation(8*cnum, 8*cnum, 3, 1, dilation=4, padding=get_pad(16, 3, 1, 4)),)
 
         self.dblock4 = nn.Sequential(
-            GatedConv2dWithActivation(8*cnum, 16*cnum, 3, 1, padding=get_pad(16, 3, 1)),
-            GatedConv2dWithActivation(16*cnum, 16*cnum, 3, 1, padding=get_pad(16, 3, 1)),)
+            GatedConv2dWithActivation(8*cnum, 16*cnum, 3, 1, dilation=8, padding=get_pad(16, 3, 1, 8)),
+            GatedConv2dWithActivation(16*cnum, 16*cnum, 3, 1, dilation=16, padding=get_pad(16, 3, 1, 16)),)
 
         self.upsample_layer4 = GatedDeConv2dWithActivation(2, 16*cnum, 8*cnum, 3, 1, padding=get_pad(32, 3, 1))
         #concate 8*cnum-> 16*cnum
@@ -110,8 +111,11 @@ class InpaintRUNNet(torch.nn.Module):
 
     def forward(self, imgs, masks, pre_imgs, pre_inter_imgs, size):
         # Coarse
-        masked_imgs =  imgs * (1 - masks) + masks
+        masked_imgs =  imgs * (1 - masks) + masks*torch.Tensor([2*117/255.0-1.0,2*104/255.0-1.0,2*123/255.0-1.0]).view(1,3,1,1).to(self.device)
+        pre_inter_imgs = imgs * (1 - masks) + masks * pre_inter_imgs
         input_imgs = torch.cat([masked_imgs, pre_inter_imgs, masks], dim=1)
+        #input_imgs = torch.cat([masked_imgs, pre_inter_imgs, masks], dim=1)
+        #print(input_imgs.size())
         x = self.input_block(input_imgs)
         ex0 = x
         x = self.downsample_layer1(x)

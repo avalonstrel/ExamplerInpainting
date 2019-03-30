@@ -26,8 +26,15 @@ result_dir = 'result_logs/{}_{}'.format(time_stamp, config.LOG_DIR)
 tensorboardlogger = TensorBoardLogger(log_dir)
 cuda0 = torch.device('cuda:{}'.format(config.GPU_ID))
 cpu0 = torch.device('cpu')
-TRAIN_SIZES = ((64,64),(128,128),(256,256))
-SIZES_TAGS = ("64x64", "128x128", "256x256")
+if config.STAGE_NUM == 5:
+    TRAIN_SIZES = ((64,64),(96,96),(128,128),(160,160),(256,256))
+    SIZES_TAGS = ("64x64", "96x96", "128x128","160x160", "256x256")
+elif config.STAGE_NUM == 3:
+    TRAIN_SIZES = ((64,64),(128,128),(256,256))
+    SIZES_TAGS = ("64x64", "128x128","256x256")
+else:
+    TRAIN_SIZES = ((256,256),)
+    SIZES_TAGS = ("256x256",)
 def logger_init():
     """
     Initialize the logger to some file.
@@ -70,6 +77,7 @@ def validate(netG, netD, GANLoss, ReconLoss, DLoss, optG, optD, dataloader, epoc
         data_time.update(time.time() - end)
         pre_imgs = ori_imgs
         pre_complete_imgs = (pre_imgs / 127.5 - 1)
+        pre_complete_imgs = pre_complete_imgs * (1 - ori_masks['val']) + ori_masks['val']
         for size in TRAIN_SIZES:
 
             masks = ori_masks['val']
@@ -86,7 +94,7 @@ def validate(netG, netD, GANLoss, ReconLoss, DLoss, optG, optD, dataloader, epoc
             imgs = (imgs / 127.5 - 1)
             # mask is 1 on masked region
             # forward
-            coarse_imgs, recon_imgs, attention = netG(imgs, masks, pre_imgs)
+            coarse_imgs, recon_imgs = netG(imgs, masks, pre_imgs)
 
             complete_imgs = recon_imgs * masks + imgs * (1 - masks)
 
@@ -143,7 +151,7 @@ def validate(netG, netD, GANLoss, ReconLoss, DLoss, optG, optD, dataloader, epoc
 
                 for tag, images in info.items():
                     h, w = images.shape[1], images.shape[2] // 5
-                    for s in TRAIN_SIZES:
+                    for s_i, s in enumerate(TRAIN_SIZES):
                         if "{}".format(s) in tag:
                             size_tag = "{}".format(s)
                             break
@@ -157,7 +165,7 @@ def validate(netG, netD, GANLoss, ReconLoss, DLoss, optG, optD, dataloader, epoc
                         gen_img.save(os.path.join(val_save_gen_dir, SIZES_TAGS[s_i], "{}_{}.png".format(size_tag, j)))
                         j += 1
                     tensorboardlogger.image_summary(tag, images, epoch)
-                path1, path2 = os.path.join(val_save_real_dir, SIZES_TAGS[2]), os.path.join(val_save_gen_dir, SIZES_TAGS[2])
+                path1, path2 = os.path.join(val_save_real_dir, SIZES_TAGS[len(SIZES_TAGS)-1]), os.path.join(val_save_gen_dir, SIZES_TAGS[len(SIZES_TAGS)-1])
                 fid_score = metrics['fid']([path1, path2], cuda=False)
                 ssim_score = metrics['ssim']([path1, path2])
                 tensorboardlogger.scalar_summary('val/fid', fid_score.item(), epoch*len(dataloader)+i)
@@ -192,15 +200,20 @@ def train(netG, netD, GANLoss, ReconLoss, DLoss, optG, optD, dataloader, epoch, 
     netD.train()
     end = time.time()
     for i, (ori_imgs, ori_masks) in enumerate(dataloader):
+        ff_mask, rect_mask = ori_masks['random_free_form'], ori_masks['random_bbox']
+        if np.random.rand() < 0.3:
+            ori_masks = rect_mask
+        else:
+            ori_masks = ff_mask
 
-
-        ori_masks = ori_masks['random_free_form']
+        #ori_masks = ori_masks['random_free_form']
 
         # Optimize Discriminator
 
         # mask is 1 on masked region
         pre_complete_imgs = ori_imgs
         pre_complete_imgs = (pre_complete_imgs / 127.5 - 1)
+        pre_complete_imgs = pre_complete_imgs * (1-ori_masks) + ori_masks
         for size in TRAIN_SIZES:
             data_time.update(time.time() - end)
             optD.zero_grad(), netD.zero_grad(), netG.zero_grad(), optG.zero_grad()
@@ -215,13 +228,13 @@ def train(netG, netD, GANLoss, ReconLoss, DLoss, optG, optD, dataloader, epoch, 
             imgs = (imgs / 127.5 - 1)
 
 
-            coarse_imgs, recon_imgs, attention = netG(imgs, masks, pre_complete_imgs)
+            coarse_imgs, recon_imgs = netG(imgs, masks, pre_complete_imgs)
             #print(attention.size(), )
             complete_imgs = recon_imgs * masks + imgs * (1 - masks)
 
 
             pos_imgs = torch.cat([imgs, masks, torch.full_like(masks, 1.)], dim=1)
-            neg_imgs = torch.cat([recon_imgs, masks, torch.full_like(masks, 1.)], dim=1)
+            neg_imgs = torch.cat([complete_imgs, masks, torch.full_like(masks, 1.)], dim=1)
             pos_neg_imgs = torch.cat([pos_imgs, neg_imgs], dim=0)
 
             pred_pos_neg = netD(pos_neg_imgs)
@@ -285,16 +298,6 @@ def train(netG, netD, GANLoss, ReconLoss, DLoss, optG, optD, dataloader, epoch, 
                     tensorboardlogger.image_summary(tag, images, epoch*len(dataloader)+i)
             end = time.time()
         if (i+1) % config.VAL_SUMMARY_FREQ == 0 and val_datas is not None:
-            # saved_model = {
-            #     'epoch': epoch + 1,
-            #     'netG_state_dict': netG.to(cpu0).state_dict(),
-            #     'netD_state_dict': netD.to(cpu0).state_dict(),
-            #     # 'optG' : optG.state_dict(),
-            #     # 'optD' : optD.state_dict()
-            # }
-            # #torch.save(saved_model, '{}/epoch_{}_ckpt.pth.tar'.format(log_dir, i+1))
-            # torch.save(saved_model, '{}/latest_ckpt.pth.tar'.format(log_dir))
-
             validate(netG, netD, GANLoss, ReconLoss, DLoss, optG, optD, val_datas , epoch, device, batch_n=i)
             netG.train()
             netD.train()

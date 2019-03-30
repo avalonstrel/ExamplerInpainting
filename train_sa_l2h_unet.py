@@ -28,8 +28,15 @@ tensorboardlogger = TensorBoardLogger(log_dir)
 cuda0 = torch.device('cuda:{}'.format(config.GPU_IDS[0]))
 cuda1 = torch.device('cuda:{}'.format(config.GPU_IDS[1]))
 cpu0 = torch.device('cpu')
-TRAIN_SIZES = ((64,64),(128,128),(256,256))
-SIZES_TAGS = ("64x64", "128x128", "256x256")
+if config.STAGE_NUM == 5:
+    TRAIN_SIZES = ((64,64),(96,96),(128,128),(160,160),(256,256))
+    SIZES_TAGS = ("64x64", "96x96", "128x128","160x160", "256x256")
+elif config.STAGE_NUM == 3:
+    TRAIN_SIZES = ((64,64),(128,128),(256,256))
+    SIZES_TAGS = ("64x64", "128x128","256x256")
+else:
+    TRAIN_SIZES = (config.IMG_SHAPES,)
+    SIZES_TAGS = ("{}x{}".format(config.IMG_SHAPES[0], config.IMG_SHAPES[0]),)
 def logger_init():
     """
     Initialize the logger to some file.
@@ -76,6 +83,7 @@ def validate(nets, loss_terms, opts, dataloader, epoch, devices=(cuda0,cuda1), b
         data_time.update(time.time() - end)
         pre_imgs = ori_imgs
         pre_complete_imgs = (pre_imgs / 127.5 - 1)
+        pre_complete_imgs = pre_complete_imgs * (1-ori_masks['val']) +  ori_masks['val']
         for size in TRAIN_SIZES:
 
             masks = ori_masks['val']
@@ -98,7 +106,7 @@ def validate(nets, loss_terms, opts, dataloader, epoch, devices=(cuda0,cuda1), b
 
 
             pos_imgs = torch.cat([imgs, masks, torch.full_like(masks, 1.)], dim=1)
-            neg_imgs = torch.cat([recon_imgs, masks, torch.full_like(masks, 1.)], dim=1)
+            neg_imgs = torch.cat([complete_imgs, masks, torch.full_like(masks, 1.)], dim=1)
             pos_neg_imgs = torch.cat([pos_imgs, neg_imgs], dim=0)
 
             pred_pos_neg = netD(pos_neg_imgs)
@@ -111,17 +119,18 @@ def validate(nets, loss_terms, opts, dataloader, epoch, devices=(cuda0,cuda1), b
 
             imgs, recon_imgs, complete_imgs = imgs.to(device1), recon_imgs.to(device1), complete_imgs.to(device1)
             p_loss = PercLoss(imgs, recon_imgs) + PercLoss(imgs, complete_imgs)
-            s_loss = StyleLoss(imgs, recon_imgs) + StyleLoss(imgs, complete_imgs)
-            p_loss, s_loss = p_loss.to(device0), s_loss.to(device0)
+            #s_loss = StyleLoss(imgs, recon_imgs) + StyleLoss(imgs, complete_imgs)
+            #p_loss, s_loss = p_loss.to(device0), s_loss.to(device0)
+            p_loss = p_loss.to(device0)
             imgs, recon_imgs, complete_imgs = imgs.to(device0), recon_imgs.to(device0), complete_imgs.to(device0)
 
-            whole_loss = r_loss + p_loss #g_loss + r_loss
+            whole_loss = r_loss + p_loss + g_loss#+ s_loss#g_loss + r_loss
 
             # Update the recorder for losses
             losses['g_loss'].update(g_loss.item(), imgs.size(0))
             losses['r_loss'].update(r_loss.item(), imgs.size(0))
             losses['p_loss'].update(p_loss.item(), imgs.size(0))
-            losses['s_loss'].update(s_loss.item(), imgs.size(0))
+            losses['s_loss'].update(0, imgs.size(0))
             losses['whole_loss'].update(whole_loss.item(), imgs.size(0))
 
             d_loss = DLoss(pred_pos, pred_neg)
@@ -173,7 +182,7 @@ def validate(nets, loss_terms, opts, dataloader, epoch, devices=(cuda0,cuda1), b
                         gen_img.save(os.path.join(val_save_gen_dir, SIZES_TAGS[s_i], "{}_{}.png".format(size_tag, j)))
                         j += 1
                     tensorboardlogger.image_summary(tag, images, epoch)
-                path1, path2 = os.path.join(val_save_real_dir, SIZES_TAGS[2]), os.path.join(val_save_gen_dir, SIZES_TAGS[2])
+                path1, path2 = os.path.join(val_save_real_dir, SIZES_TAGS[len(SIZES_TAGS)-1]), os.path.join(val_save_gen_dir, SIZES_TAGS[len(SIZES_TAGS)-1])
                 fid_score = metrics['fid']([path1, path2], cuda=False)
                 ssim_score = metrics['ssim']([path1, path2])
                 tensorboardlogger.scalar_summary('val/fid', fid_score.item(), epoch*len(dataloader)+i)
@@ -210,14 +219,20 @@ def train(nets, loss_terms, opts, dataloader, epoch, devices=(cuda0,cuda1), val_
     netD.train()
     end = time.time()
     for i, (ori_imgs, ori_masks) in enumerate(dataloader):
-
-        ori_masks = ori_masks['random_free_form']
+        ff_mask, rect_mask = ori_masks['random_free_form'], ori_masks['random_bbox']
+        if np.random.rand() < config.RANDOM_RECT_PROB:
+            ori_masks = rect_mask
+        else:
+            ori_masks = ff_mask
+        #ori_masks = ori_masks['random_free_form']
 
         # Optimize Discriminator
 
         # mask is 1 on masked region
         pre_complete_imgs = ori_imgs
         pre_complete_imgs = (pre_complete_imgs / 127.5 - 1)
+        pre_complete_imgs = pre_complete_imgs * (1-ori_masks) +  ori_masks
+
         for size in TRAIN_SIZES:
             data_time.update(time.time() - end)
             optD.zero_grad(), netD.zero_grad(), netG.zero_grad(), optG.zero_grad()
@@ -237,7 +252,7 @@ def train(nets, loss_terms, opts, dataloader, epoch, devices=(cuda0,cuda1), val_
             complete_imgs = recon_imgs * masks + imgs * (1 - masks)
 
             pos_imgs = torch.cat([imgs, masks, torch.full_like(masks, 1.)], dim=1)
-            neg_imgs = torch.cat([recon_imgs, masks, torch.full_like(masks, 1.)], dim=1)
+            neg_imgs = torch.cat([complete_imgs, masks, torch.full_like(masks, 1.)], dim=1)
             pos_neg_imgs = torch.cat([pos_imgs, neg_imgs], dim=0)
 
             pred_pos_neg = netD(pos_neg_imgs)
@@ -245,9 +260,10 @@ def train(nets, loss_terms, opts, dataloader, epoch, devices=(cuda0,cuda1), val_
             d_loss = DLoss(pred_pos, pred_neg)
             losses['d_loss'].update(d_loss.item(), imgs.size(0))
             #print(size)
-            d_loss.backward(retain_graph=True)
+            if i % 3:
+                d_loss.backward(retain_graph=True)
 
-            optD.step()
+                optD.step()
 
 
             # Optimize Generator
@@ -259,8 +275,9 @@ def train(nets, loss_terms, opts, dataloader, epoch, devices=(cuda0,cuda1), val_
 
             imgs, recon_imgs, complete_imgs = imgs.to(device1), recon_imgs.to(device1), complete_imgs.to(device1)
             p_loss = PercLoss(imgs, recon_imgs) + PercLoss(imgs, complete_imgs)
-            s_loss = StyleLoss(imgs, recon_imgs) + StyleLoss(imgs, complete_imgs)
-            p_loss, s_loss = p_loss.to(device0), s_loss.to(device0)
+            #s_loss = StyleLoss(imgs, recon_imgs) + StyleLoss(imgs, complete_imgs)
+            #p_loss, s_loss = p_loss.to(device0), s_loss.to(device0)
+            p_loss = p_loss.to(device0)
             imgs, recon_imgs, complete_imgs = imgs.to(device0), recon_imgs.to(device0), complete_imgs.to(device0)
 
             whole_loss = r_loss + p_loss + g_loss
@@ -268,7 +285,7 @@ def train(nets, loss_terms, opts, dataloader, epoch, devices=(cuda0,cuda1), val_
             # Update the recorder for losses
             losses['g_loss'].update(g_loss.item(), imgs.size(0))
             losses['p_loss'].update(p_loss.item(), imgs.size(0))
-            losses['s_loss'].update(s_loss.item(), imgs.size(0))
+            losses['s_loss'].update(0, imgs.size(0))
             losses['r_loss'].update(r_loss.item(), imgs.size(0))
             losses['whole_loss'].update(whole_loss.item(), imgs.size(0))
             whole_loss.backward(retain_graph=True)
@@ -288,7 +305,7 @@ def train(nets, loss_terms, opts, dataloader, epoch, devices=(cuda0,cuda1), val_
                             ,g_loss=losses['g_loss'], d_loss=losses['d_loss'], p_loss=losses['p_loss'], s_loss=losses['s_loss']))
                 # Tensorboard logger for scaler and images
                 info_terms = {'{}WGLoss'.format(size):whole_loss.item(), '{}ReconLoss'.format(size):r_loss.item(), "{}GANLoss".format(size):g_loss.item(), "{}DLoss".format(size):d_loss.item(),
-                              "{}PercLoss".format(size):p_loss.item(), "{}StyleLoss".format(size):s_loss.item()}
+                              "{}PercLoss".format(size):p_loss.item()}
 
 
                 for tag, value in info_terms.items():
@@ -296,6 +313,7 @@ def train(nets, loss_terms, opts, dataloader, epoch, devices=(cuda0,cuda1), val_
 
                 for tag, value in losses.items():
                     tensorboardlogger.scalar_summary('avg_'+tag, value.avg, epoch*len(dataloader)+i)
+
 
                 def img2photo(imgs):
                     return ((imgs+1)*127.5).transpose(1,2).transpose(2,3).detach().cpu().numpy()
@@ -361,7 +379,7 @@ def main():
 
     # Define the Network Structure
     logger.info("Define the Network Structure and Losses")
-    netG = InpaintRUNNet()
+    netG = InpaintRUNNet(cuda0, n_in_channel=config.N_CHANNEL)
     netD = InpaintSADirciminator()
     netVGG = vgg16_bn(pretrained=True)
 

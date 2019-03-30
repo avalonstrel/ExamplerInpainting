@@ -8,7 +8,7 @@ from .base_dataset import BaseDataset, NoriBaseDataset
 from torch.utils.data import Dataset, DataLoader
 import pickle as pkl
 
-ALLMASKTYPES = ['bbox', 'seg', 'random', 'random_free_form', 'val']
+ALLMASKTYPES = ['bbox', 'seg', 'random_bbox', 'random_free_form', 'val']
 
 class InpaintDataset(BaseDataset):
     """
@@ -28,10 +28,11 @@ class InpaintDataset(BaseDataset):
     def __init__(self, img_flist_path, mask_flist_paths_dict,
                 resize_shape=(256, 256), transforms_oprs=['random_crop', 'to_tensor'],
                 random_bbox_shape=(32, 32), random_bbox_margin=(64, 64),
-                random_ff_setting={'img_shape':[256,256],'mv':5, 'ma':4.0, 'ml':40, 'mbw':10}):
+                random_ff_setting={'img_shape':[256,256],'mv':5, 'ma':4.0, 'ml':40, 'mbw':10}, random_bbox_number=5):
 
         with open(img_flist_path, 'r') as f:
             self.img_paths = f.read().splitlines()
+        random_ff_setting['img_shape'] = resize_shape
 
         self.mask_paths = {}
         for mask_type in mask_flist_paths_dict:
@@ -47,8 +48,8 @@ class InpaintDataset(BaseDataset):
         self.random_bbox_shape = random_bbox_shape
         self.random_bbox_margin = random_bbox_margin
         self.random_ff_setting = random_ff_setting
+        self.random_bbox_number = random_bbox_number
         self.transform_initialize(resize_shape, transforms_oprs)
-
 
 
 
@@ -83,7 +84,7 @@ class InpaintDataset(BaseDataset):
         """
         Read Image
         """
-        img = Image.open(path)
+        img = Image.open(path).convert("RGB")
         return img
 
 
@@ -91,8 +92,11 @@ class InpaintDataset(BaseDataset):
         """
         Read Masks now only support bbox
         """
-        if mask_type == 'random':
-            bbox = InpaintDataset.random_bbox(self.resize_shape, self.random_bbox_margin, self.random_bbox_shape)
+        if mask_type == 'random_bbox':
+            bboxs = []
+            for i in range(self.random_bbox_number):
+                bbox = InpaintDataset.random_bbox(self.resize_shape, self.random_bbox_margin, self.random_bbox_shape)
+                bboxs.append(bbox)
         elif mask_type == 'random_free_form':
             mask = InpaintDataset.random_ff_mask(self.random_ff_setting)
             return Image.fromarray(np.tile(mask,(1,1,3)).astype(np.uint8))
@@ -101,7 +105,11 @@ class InpaintDataset(BaseDataset):
             return Image.fromarray(np.tile(mask,(1,1,3)).astype(np.uint8))
         else:
             bbox = InpaintDataset.read_bbox(path)
-        return InpaintDataset.bbox2mask(bbox, self.resize_shape)
+            bboxs = [bbox]
+        #print(bboxs, self.resize_shape)
+        mask = InpaintDataset.bbox2mask(bboxs, self.resize_shape)
+        #print('final', mask.shape)
+        return Image.fromarray(np.tile(mask,(1,1,3)).astype(np.uint8))
 
     @staticmethod
     def read_val_mask(path):
@@ -227,7 +235,7 @@ class InpaintDataset(BaseDataset):
 
         h,w = config['img_shape']
         mask = np.zeros((h,w))
-        num_v = 10+np.random.randint(config['mv'])#tf.random_uniform([], minval=0, maxval=config.MAXVERTEX, dtype=tf.int32)
+        num_v = 12+np.random.randint(config['mv'])#tf.random_uniform([], minval=0, maxval=config.MAXVERTEX, dtype=tf.int32)
 
         for i in range(num_v):
             start_x = np.random.randint(w)
@@ -243,11 +251,12 @@ class InpaintDataset(BaseDataset):
 
                 cv2.line(mask, (start_y, start_x), (end_y, end_x), 1.0, brush_w)
                 start_x, start_y = end_x, end_y
+
         return mask.reshape(mask.shape+(1,)).astype(np.float32)
 
 
     @staticmethod
-    def bbox2mask(bbox, shape):
+    def bbox2mask(bboxs, shape):
         """Generate mask tensor from bbox.
 
         Args:
@@ -260,12 +269,15 @@ class InpaintDataset(BaseDataset):
 
         """
         height, width = shape
-        mask = np.zeros(( height, width, 1), np.float32)
-        h = int(0.1*bbox[2])+np.random.randint(int(bbox[2]*0.2+1))
-        w = int(0.1*bbox[3])+np.random.randint(int(bbox[3]*0.2)+1)
-        mask[bbox[0]+h:bbox[0]+bbox[2]-h,
-             bbox[1]+w:bbox[1]+bbox[3]-w, :] = 1.
-        return mask
+        mask = np.zeros(( height, width), np.float32)
+        #print(mask.shape)
+        for bbox in bboxs:
+            h = int(0.1*bbox[2])+np.random.randint(int(bbox[2]*0.2+1))
+            w = int(0.1*bbox[3])+np.random.randint(int(bbox[3]*0.2)+1)
+            mask[bbox[0]+h:bbox[0]+bbox[2]-h,
+                 bbox[1]+w:bbox[1]+bbox[3]-w] = 1.
+        #print("after", mask.shape)
+        return mask.reshape(mask.shape+(1,)).astype(np.float32)
 
 class InpaintWithFileDataset(Dataset):
     """

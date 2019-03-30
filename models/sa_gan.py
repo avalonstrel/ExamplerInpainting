@@ -157,7 +157,7 @@ class InpaintSANet(torch.nn.Module):
 
             GatedConv2dWithActivation(4*cnum, 4*cnum, 3, 1, dilation=16, padding=get_pad(64, 3, 1, 16))
         )
-        self.refine_attn = Self_Attn(4*cnum, 'relu', with_attn=True)
+        self.refine_attn = Self_Attn(4*cnum, 'relu', with_attn=False)
         self.refine_upsample_net = nn.Sequential(
             GatedConv2dWithActivation(4*cnum, 4*cnum, 3, 1, padding=get_pad(64, 3, 1)),
 
@@ -190,11 +190,11 @@ class InpaintSANet(torch.nn.Module):
         else:
             input_imgs = torch.cat([masked_imgs, img_exs, masks, torch.full_like(masks, 1.)], dim=1)
         x = self.refine_conv_net(input_imgs)
-        x, attention = self.refine_attn(x)
-        print(x.size(), attention.size())
+        x= self.refine_attn(x)
+        #print(x.size(), attention.size())
         x = self.refine_upsample_net(x)
         x = torch.clamp(x, -1., 1.)
-        return coarse_x, x, attention
+        return coarse_x, x
 
 class InpaintSADirciminator(nn.Module):
     def __init__(self):

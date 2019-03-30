@@ -1,0 +1,1 @@
+python3 train_de_sa_l2h_unet.py config/inpaint_places2_de_sa_l2h_unet_perc.yml
